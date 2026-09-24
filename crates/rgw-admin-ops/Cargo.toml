@@ -12,5 +12,6 @@ rgw-sal.workspace = true
 rgw-rest.workspace = true
 chrono.workspace = true
 rand.workspace = true
-serde_json.workspace = true
-uuid.workspace = true
+# RGW's formatter emits keys in insertion order; the dump documents are
+# `Value`s, so the map has to keep that order.
+serde_json = { workspace = true, features = ["preserve_order"] }
