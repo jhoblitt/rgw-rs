@@ -206,22 +206,38 @@ pub(crate) fn parse_delete_request(body: &[u8]) -> RgwResult<DeleteRequest> {
     loop {
         let event = reader.read_event().map_err(|_| RgwError::MalformedXml)?;
         let (open, close) = match &event {
-            Event::Start(e) => (Some(e.local_name().as_ref().to_vec()), false),
-            Event::Empty(e) => (Some(e.local_name().as_ref().to_vec()), true),
+            Event::Start(e) => (Some(e.local_name().as_ref().to_owned()), false),
+            Event::Empty(e) => (Some(e.local_name().as_ref().to_owned()), true),
             Event::End(_) => (None, true),
             Event::Text(t) => {
-                content.push_str(&t.unescape().map_err(|_| RgwError::MalformedXml)?);
+                content.push_str(&t);
                 continue;
             }
             Event::CData(c) => {
-                content.push_str(std::str::from_utf8(c).map_err(malformed)?);
+                content.push_str(&c);
+                continue;
+            }
+            // quick-xml hands `&amp;`-style references over unresolved; the
+            // five predefined entities are all a well-formed document may use
+            // without a DTD.
+            Event::GeneralRef(r) => {
+                match r.resolve_char_ref().map_err(|_| RgwError::MalformedXml)? {
+                    Some(ch) => content.push(ch),
+                    None => content.push_str(match r.borrow().into_inner().as_ref() {
+                        "amp" => "&",
+                        "lt" => "<",
+                        "gt" => ">",
+                        "quot" => "\"",
+                        "apos" => "'",
+                        _ => return Err(RgwError::MalformedXml),
+                    }),
+                }
                 continue;
             }
             Event::Eof => break,
             _ => continue,
         };
         if let Some(name) = open {
-            let name = String::from_utf8(name).map_err(|_| RgwError::MalformedXml)?;
             if path.is_empty() {
                 if name != "Delete" || saw_root {
                     return Err(RgwError::MalformedXml);
