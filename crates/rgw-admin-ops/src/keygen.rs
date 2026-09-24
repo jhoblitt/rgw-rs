@@ -45,7 +45,8 @@ mod tests {
         for _ in 0..100 {
             let k = generate_secret_key();
             assert_eq!(k.len(), SECRET_KEY_LEN);
-            assert!(k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/'), "{k}");
+            // The message deliberately omits the key: it is a secret, even here.
+            assert!(k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/'));
         }
     }
 
