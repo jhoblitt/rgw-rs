@@ -11,7 +11,7 @@ use std::fmt::{self, Write as _};
 
 use axum::http::HeaderMap;
 use chrono::{DateTime, NaiveDateTime, Utc};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac, KeyInit, Mac};
 use percent_encoding::percent_decode_str;
 use rgw_types::{RgwError, RgwResult};
 use sha2::{Digest, Sha256};
