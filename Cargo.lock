@@ -1903,11 +1903,15 @@ dependencies = [
 name = "rgw-rest-s3"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
+ "base64 0.22.1",
  "bytes",
  "chrono",
  "futures",
+ "hex",
  "http-body-util",
+ "md-5 0.10.6",
  "percent-encoding",
  "quick-xml",
  "rgw-auth",
@@ -1916,6 +1920,7 @@ dependencies = [
  "rgw-types",
  "serde",
  "tokio",
+ "tower",
  "tracing",
  "uuid",
 ]
