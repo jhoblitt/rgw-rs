@@ -1,0 +1,5 @@
+# Referenced from .github/workflows/codeql.yml. The integration-test crate
+# drives an in-process server over plain HTTP with throwaway credentials by
+# design; code scanning otherwise reports that as cleartext transmission.
+paths-ignore:
+  - crates/rgw-tests
