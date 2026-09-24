@@ -1,7 +1,7 @@
 //! Access key generation, as `RGWAccessKeyPool::generate_key` does it with
 //! `gen_rand_alphanumeric_upper` and `gen_rand_base64`.
 
-use rand::Rng;
+use rand::RngExt;
 
 /// `PUBLIC_ID_LEN` in `rgw_user.h`.
 pub const ACCESS_KEY_LEN: usize = 20;
@@ -13,8 +13,8 @@ const SECRET_ALPHABET: &[u8] =
     b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 fn random_string(alphabet: &[u8], len: usize) -> String {
-    let mut rng = rand::thread_rng();
-    (0..len).map(|_| alphabet[rng.gen_range(0..alphabet.len())] as char).collect()
+    let mut rng = rand::rng();
+    (0..len).map(|_| alphabet[rng.random_range(0..alphabet.len())] as char).collect()
 }
 
 /// `gen_rand_alphanumeric_upper(cct, id, PUBLIC_ID_LEN)`: 20 chars of `A-Z0-9`.
