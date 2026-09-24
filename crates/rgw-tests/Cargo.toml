@@ -12,15 +12,19 @@ rgw-types.workspace = true
 rgw-sal.workspace = true
 rgw-sal-sqlite.workspace = true
 rgwd.workspace = true
+rgw-admin-ops.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
-
-[dev-dependencies]
-aws-config.workspace = true
+axum.workspace = true
+tempfile.workspace = true
 aws-credential-types.workspace = true
 aws-sdk-s3.workspace = true
 aws-sigv4.workspace = true
-http.workspace = true
 reqwest.workspace = true
+
+[dev-dependencies]
+base64.workspace = true
+crc32fast.workspace = true
+aws-config.workspace = true
+http.workspace = true
 serde_json.workspace = true
-tempfile.workspace = true
