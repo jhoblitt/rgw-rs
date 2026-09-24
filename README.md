@@ -37,3 +37,26 @@ export CARGO_HOME="$PWD/.cargo-home"
 cargo build
 cargo test
 ```
+
+## Status
+
+Every crate builds warning-free; 119 tests pass; `scripts/smoke.sh`
+drives the built `rgwd` with the aws CLI, s3cmd and a botocore-signed
+admin request and reports `ALL PASS`. Supported: SigV4 header auth,
+ListBuckets, Create/Head/Delete bucket, ListObjects V1 and V2,
+Put/Get/Head/Delete object, multi-object delete, and the `/admin/user`,
+`/admin/bucket` and `/admin/info` APIs. Not supported: multipart,
+versioning, ACLs beyond owner-only, presigned URLs, SigV2, TLS, Lua, and
+any RADOS backend. See `FINDINGS.md`.
+
+## Running it
+
+```sh
+export CARGO_HOME="$PWD/.cargo-home"   # or drop this to use ~/.cargo online
+cargo test --workspace
+bash scripts/smoke.sh                  # needs aws, s3cmd, python3 with botocore
+
+cargo run -p rgwd -- --listen 127.0.0.1:7480 --db rgw.db
+cargo run -p radosgw-admin -- --db rgw.db user create --uid me \
+    --display-name Me --access-key AK --secret-key SK --caps 'users=*;buckets=*'
+```
