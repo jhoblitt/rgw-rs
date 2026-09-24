@@ -1,5 +1,8 @@
 # rgw-rs
 
+[![ci](https://github.com/jhoblitt/rgw-rs/actions/workflows/ci.yml/badge.svg)](https://github.com/jhoblitt/rgw-rs/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/jhoblitt/rgw-rs/badge)](https://scorecard.dev/viewer/?uri=github.com/jhoblitt/rgw-rs)
+
 A research spike: can Ceph's RADOS Gateway (`src/rgw` in ceph/ceph) be
 extracted into its own repository and re-expressed in Rust, keeping its
 REST -> op -> storage-abstraction layering, without depending on the rest
