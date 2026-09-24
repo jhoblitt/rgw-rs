@@ -1,0 +1,58 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.98"
+license = "LGPL-2.1-or-later"
+
+[workspace.dependencies]
+rgw-types = { path = "crates/rgw-types" }
+rgw-sal = { path = "crates/rgw-sal" }
+rgw-sal-sqlite = { path = "crates/rgw-sal-sqlite" }
+rgw-rest = { path = "crates/rgw-rest" }
+rgw-auth = { path = "crates/rgw-auth" }
+rgw-rest-s3 = { path = "crates/rgw-rest-s3" }
+rgw-admin-ops = { path = "crates/rgw-admin-ops" }
+rgw-rest-admin = { path = "crates/rgw-rest-admin" }
+rgwd = { path = "crates/rgwd" }
+
+tokio = { version = "1.53", features = ["full"] }
+axum = { version = "0.8", features = ["macros"] }
+http = "1.5"
+http-body-util = "0.1"
+bytes = "1.12"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+quick-xml = { version = "0.37", features = ["serialize"] }
+sha2 = "0.10"
+hmac = "0.12"
+md-5 = "0.10"
+hex = "0.4"
+base64 = "0.22"
+percent-encoding = "2.3"
+crc32fast = "1.5"
+rusqlite = { version = "0.32", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive", "env"] }
+async-trait = "0.1"
+url = "2"
+tempfile = "3"
+# The SDK's default `rustls` feature is its legacy hyper 0.14 client on
+# rustls 0.21, whose webpki has open advisories; the modern client is enough.
+aws-sdk-s3 = { version = "1", default-features = false, features = ["http-1x", "default-https-client", "rt-tokio"] }
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "default-https-client", "rt-tokio"] }
+aws-credential-types = { version = "1", features = ["hardcoded-credentials"] }
+aws-sigv4 = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json"] }

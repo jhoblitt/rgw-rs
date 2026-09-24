@@ -1,0 +1,14 @@
+[package]
+name = "rgw-sal"
+description = "The storage abstraction layer (rgw_sal.h) as an async trait, with a conformance suite"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rgw-types.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+futures.workspace = true

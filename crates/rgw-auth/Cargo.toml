@@ -1,0 +1,24 @@
+[package]
+name = "rgw-auth"
+description = "S3 request authentication (rgw_auth_s3.cc): AWS SigV4 and anonymous access"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rgw-types.workspace = true
+rgw-sal.workspace = true
+rgw-rest.workspace = true
+axum.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+hex.workspace = true
+hmac.workspace = true
+http-body-util.workspace = true
+percent-encoding.workspace = true
+sha2.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

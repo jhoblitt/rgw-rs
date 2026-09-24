@@ -1,0 +1,26 @@
+[package]
+name = "rgw-tests"
+description = "Integration tests: a real S3 SDK and signed admin requests against an in-process rgwd"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+rgw-types.workspace = true
+rgw-sal.workspace = true
+rgw-sal-sqlite.workspace = true
+rgwd.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+aws-config.workspace = true
+aws-credential-types.workspace = true
+aws-sdk-s3.workspace = true
+aws-sigv4.workspace = true
+http.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true

@@ -1,0 +1,5 @@
+# Build scripts (bundled SQLite, aws-lc-sys) shell out to a C compiler. The
+# development machine puts ccache first in PATH, and a sandboxed build cannot
+# write its cache, so disable it for this workspace.
+[env]
+CCACHE_DISABLE = "1"

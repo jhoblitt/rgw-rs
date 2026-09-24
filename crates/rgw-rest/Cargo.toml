@@ -1,0 +1,19 @@
+[package]
+name = "rgw-rest"
+description = "Shared REST plumbing (rgw_rest.h): error rendering, request ids, date formats"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rgw-types.workspace = true
+axum.workspace = true
+chrono.workspace = true
+quick-xml.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

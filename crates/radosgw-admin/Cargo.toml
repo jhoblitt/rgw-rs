@@ -1,0 +1,17 @@
+[package]
+name = "radosgw-admin"
+description = "The admin CLI (radosgw-admin.cc), talking to the driver directly"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rgw-types.workspace = true
+rgw-sal.workspace = true
+rgw-sal-sqlite.workspace = true
+rgw-admin-ops.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
