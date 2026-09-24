@@ -1,0 +1,34 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The runner ships rustup; installing through it avoids a third-party
+      # action whose refs are moving branches that cannot be SHA-pinned.
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.98 --profile minimal
+          rustup default 1.98
+
+      # The interop smoke script needs the aws CLI and s3cmd and is not run here.
+      - name: Build and test
+        run: cargo test --workspace --locked

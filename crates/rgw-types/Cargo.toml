@@ -1,0 +1,15 @@
+[package]
+name = "rgw-types"
+description = "Domain types mirroring RGW's rgw_user, rgw_bucket and rgw_obj types"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

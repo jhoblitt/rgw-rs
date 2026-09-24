@@ -1,0 +1,17 @@
+[package]
+name = "rgw-admin-ops"
+description = "Admin operations shared by the REST admin API and radosgw-admin (rgw_user.cc, rgw_bucket.cc)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rgw-types.workspace = true
+rgw-sal.workspace = true
+rgw-rest.workspace = true
+chrono.workspace = true
+rand.workspace = true
+# RGW's formatter emits keys in insertion order; the dump documents are
+# `Value`s, so the map has to keep that order.
+serde_json = { workspace = true, features = ["preserve_order"] }
