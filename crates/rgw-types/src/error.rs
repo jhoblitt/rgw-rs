@@ -22,6 +22,14 @@ pub enum RgwError {
     XAmzContentSha256Mismatch,
     #[error("content-md5 does not match the payload")]
     BadDigest,
+    #[error("content-md5 is not valid base64")]
+    InvalidDigest,
+    #[error("user suspended")]
+    UserSuspended,
+    #[error("entity too large")]
+    EntityTooLarge,
+    #[error("missing content length")]
+    MissingContentLength,
     #[error("no such user")]
     NoSuchUser,
     #[error("user already exists")]
@@ -32,6 +40,8 @@ pub enum RgwError {
     NoSuchBucket,
     #[error("bucket already exists")]
     BucketAlreadyExists,
+    #[error("bucket already owned by you")]
+    BucketAlreadyOwnedByYou,
     #[error("bucket not empty")]
     BucketNotEmpty,
     #[error("invalid bucket name")]
@@ -67,11 +77,16 @@ impl RgwError {
             Self::AuthorizationHeaderMalformed(_) => "AuthorizationHeaderMalformed",
             Self::XAmzContentSha256Mismatch => "XAmzContentSHA256Mismatch",
             Self::BadDigest => "BadDigest",
+            Self::InvalidDigest => "InvalidDigest",
+            Self::UserSuspended => "UserSuspended",
+            Self::EntityTooLarge => "EntityTooLarge",
+            Self::MissingContentLength => "MissingContentLength",
             Self::NoSuchUser => "NoSuchUser",
             Self::UserAlreadyExists => "UserAlreadyExists",
             Self::KeyExists => "KeyExists",
             Self::NoSuchBucket => "NoSuchBucket",
             Self::BucketAlreadyExists => "BucketAlreadyExists",
+            Self::BucketAlreadyOwnedByYou => "BucketAlreadyOwnedByYou",
             Self::BucketNotEmpty => "BucketNotEmpty",
             Self::InvalidBucketName => "InvalidBucketName",
             Self::TooManyBuckets => "TooManyBuckets",
@@ -92,10 +107,13 @@ impl RgwError {
             Self::AccessDenied
             | Self::InvalidAccessKeyId
             | Self::SignatureDoesNotMatch
-            | Self::RequestTimeTooSkewed => 403,
+            | Self::RequestTimeTooSkewed
+            | Self::UserSuspended => 403,
             Self::AuthorizationHeaderMalformed(_)
             | Self::XAmzContentSha256Mismatch
             | Self::BadDigest
+            | Self::InvalidDigest
+            | Self::EntityTooLarge
             | Self::InvalidBucketName
             | Self::TooManyBuckets
             | Self::InvalidArgument(_)
@@ -103,9 +121,11 @@ impl RgwError {
             | Self::MalformedXml => 400,
             Self::NoSuchUser | Self::NoSuchBucket | Self::NoSuchKey => 404,
             Self::MethodNotAllowed => 405,
+            Self::MissingContentLength => 411,
             Self::UserAlreadyExists
             | Self::KeyExists
             | Self::BucketAlreadyExists
+            | Self::BucketAlreadyOwnedByYou
             | Self::BucketNotEmpty => 409,
             Self::InvalidRange => 416,
             Self::InternalError(_) => 500,
