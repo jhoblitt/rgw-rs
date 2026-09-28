@@ -1,15 +1,17 @@
 # rgw-rs design
 
-Status: draft, 2026-09-27, for owner review before planning. Nothing in
-it is approved. Companions: rgw-go's `docs/exclusions.md`, canon for scope,
-coexistence obligations and benchmark parity for both projects by owner
-decision of 2026-09-25; the rados-rs RGW MVP design on branch
+Status: draft, 2026-09-27, for owner review before planning. The owner's
+decisions are recorded in section 15; nothing else in it is approved, and
+the adversarial review's edits are listed at the end. Companions:
+rgw-go's `docs/exclusions.md`, canon for scope, coexistence obligations
+and benchmark parity for both projects by owner decision of 2026-09-25;
+the rados-rs RGW MVP design on branch
 `design/rgw-mvp`, whose encoding-rule paragraph the owner adopted for
 rgw-rs; and rgw-go's design spec, whose layer map, gates and phase order
 this document mirrors wherever section 16 does not say otherwise. Claims
 about C++ RGW were checked against ceph/ceph v19.2.6 and v20.2.4, about
 Rook against v1.20.7 and main at dc7829268, about rados-rs against the
-fork's `origin/main` at a511eca, about rgw-go at ca998e2, and about the
+fork's `origin/main` at 0b5d1a2, about rgw-go at b0929ee, and about the
 spike at 8621b5a. Each claim's evidence is in the appendix; anything
 marked unverified there is a lead, not a fact.
 
@@ -30,8 +32,9 @@ without TLS, against current Rook main. The suite's shape and its
 exclusions are as `docs/exclusions.md` records them, with one update that
 document needs: at Rook main the suite also runs a user default-placement
 test and a user default-storage-class test, and its zoned store declares
-two placements and a second storage class, so placement targets and
-storage classes are on the acceptance path from phase 1.
+a second placement, `bar`; the `FOO` storage class predates main.
+Placement targets and storage classes are therefore on the acceptance
+path from phase 1.
 
 Beyond the criterion, rgw-rs is benchmarked against radosgw and rgw-go on
 the same cluster. rgw-go's question is what the cgo boundary costs. rgw-rs
@@ -70,7 +73,8 @@ boundary can only be estimated.
   holds the object-class encodings, by the owner's design for that fork.
   The consequence is a rule: a RADOS capability rgw-rs lacks is a rados-rs
   package, never a workaround in the gateway. Section 8 ends with the
-  gaps this draft found, and phase 0 has a package for them.
+  gaps this draft found, and section 14 schedules each before its first
+  user.
 - **Encoding primitives come from rados-rs.** `rados::denc` and its
   derive macros are the wire encoding; rgw-rs adds only RGW's stored
   types. rgw-go wrote its own `denc` because go-ceph has none; rgw-rs
@@ -102,10 +106,10 @@ than one crate at all: a Rust module cannot forbid an import, a crate can.
 | Crate | Provides | rgw-go counterpart |
 |---|---|---|
 | `rgw-meta` | RGW's stored types with their encodings over `rados::denc`: identity primitives (user, bucket, object key, pool with its name and namespace split, placement rule), user and account, bucket entry point, instance and layout, zone parameters, zonegroup, realm and period, manifest, compression info, ACL policy, cache-notify record; encode at the cluster's release, decode every version | `internal/meta`, `internal/acl` (encoding only) |
-| `rgw-core` | the ops, one type per operation; the store traits they consume, split by concern, with in-memory fakes and the conformance suite; auth (SigV4 header, query and presigned, chunked and trailer readers, SigV2, anonymous), the policy language, ACL and quota evaluation; the S3, admin, IAM and STS protocol layers; the dispatch table; error documents | `internal/op`, `auth`, `policy`, `acl`, `s3`, `admin`, `iam` |
-| `rgw-driver` | the RADOS store, implementing `rgw-core`'s traits over `rados` and `rados-cls`: the configuration bridge and release detection, zone and placement resolution, object naming, manifests and striping, atomic head writes, the index protocol, GC enqueue, the metadata cache with watch and notify, quotas, usage; the workers | `internal/driver`, `internal/cls/*` (which live in `rados-cls` here) |
-| `rgwd` | the binary: radosgw-argv handling, the beast-spec frontend on hyper with TLS, deadlines and drain, metrics, the admin socket, the ops log, build info | `cmd/rgw-go`, `internal/cli`, `cephconf`, `frontend`, `metrics`, `asok`, `opslog` |
-| `rgw-tests` | integration and cluster tests, the populator, the corpus harness and the gates; not published | `test/gate`, `hack/rooket`, `hack/goldens` |
+| `rgw-core` | the ops, one type per operation; the store traits they consume, split by concern, with in-memory fakes and the conformance suite; auth (SigV4 header, query and presigned, chunked and trailer readers, SigV2, anonymous), the policy language, ACL and quota evaluation; the S3, admin, IAM and STS protocol layers; the dispatch table; error documents | `internal/acl`; planned: `internal/op`, `auth`, `policy`, `s3`, `admin`, `iam` |
+| `rgw-driver` | the RADOS store, implementing `rgw-core`'s traits over `rados` and `rados-cls`: the configuration bridge and release detection, zone and placement resolution, object naming, manifests and striping, atomic head writes, the index protocol, GC enqueue, the metadata cache with watch and notify, quotas, usage; the workers | `internal/cls/*` (which live in `rados-cls` here); planned: `internal/driver` |
+| `rgwd` | the binary: radosgw-argv handling, the beast-spec frontend on hyper with TLS, deadlines and drain, mgr registration and perf reports, metrics, the admin socket, the ops log, build info | `cmd/rgw-go`, `internal/{cli,version}`; planned: `cephconf`, `frontend`, `metrics`, `asok`, `opslog` |
+| `rgw-tests` | integration and cluster tests, the golden generator, the populator, the corpus harness and the gates; not published | `test/gate`, `hack/rooket`, `hack/goldens` (the generator; the goldens live at `<pkg>/testdata/goldens`) |
 
 Rules inside the table:
 
@@ -142,65 +146,135 @@ tracing and tracing-subscriber; thiserror; percent-encoding, base64,
 hex, uuid and one time crate. Test-only: aws-sdk-s3, aws-sigv4, reqwest,
 tempfile. Everything else is the standard library.
 
-Gates, taken from rados-rs's own: `cargo fmt --check`, `cargo clippy
---workspace --all-targets --all-features -- -D warnings`, `cargo test
---workspace --all-targets --locked`, and `cargo deny check` for
-advisories and licenses. Workspace lints deny `unwrap_used`,
-`expect_used` and `panic` outside tests, as rados-rs's rule says in prose.
+Gates, extending rados-rs's own (fmt, clippy `-D warnings` per feature
+set, test): `cargo fmt --all --check`, `cargo clippy --workspace
+--all-targets --all-features -- -D warnings`, `cargo test --workspace
+--all-targets --locked`, and `cargo deny check` for advisories and
+licenses; `--all-features`, `--locked` and deny are additions. Workspace
+lints deny `unwrap_used`, `expect_used` and `panic` outside tests, which
+rados-rs states only in prose. The tree is LGPL-2.1-or-later, as the
+spike is (decision 8), and `cargo deny`'s license policy admits the
+licenses compatible with it, rados-rs's MIT among them.
 
 ## 5. Configuration and invocation
 
 Rook launches `radosgw` with `--foreground`, `--fsid`, `--keyring`,
-`--mon-host`, `--id`, `--setuser`, `--setgroup`, the `--default-log-*`
-flags, `--host=$(POD_NAME)`, `--rgw-frontends=beast port=8080 ...` with
-the TLS keys when a certificate is set, `--rgw-mime-types-file`,
-`--rgw-realm`, `--rgw-zonegroup`, `--rgw-zone`, and conditionally
-`--rgw-enable-apis`, the ops-log pair, `--rgw-dns-name` and
-`--service-unique-id`; and it writes `rgw_zone`, `rgw_zonegroup`,
-`rgw_run_sync_thread`, `rgw_log_nonexistent_bucket`,
-`rgw_log_object_name_utc` and `rgw_enable_usage_log` into the mon config
-store for the daemon's own section through `config assimilate-conf`. Two
-corrections to `docs/exclusions.md` follow from reading that code:
-`rgw_run_sync_thread` is written `true` unless the store disables
+`--mon-host`, `--mon-initial-members`, `--id=rgw.<store>.<letter>`,
+`--setuser`, `--setgroup`, six `--default-*` logging flags that send
+every log to stderr and none to a file, `--host=$(POD_NAME)`,
+`--rgw-frontends=beast port=8080 ...` with the TLS keys when a
+certificate is set, `--rgw-mime-types-file`, `--rgw-realm`,
+`--rgw-zonegroup` and `--rgw-zone`. Conditionally it adds
+`--rgw-enable-apis`, the ops-log pair, `--rgw-dns-name`,
+`--ms-bind-ipv4` or `--ms-bind-ipv6`, the SSE-KMS and SSE-S3 vault
+flags, `--rados-replica-read-policy` and `--crush-location` in place of
+`--host` for read affinity on Tentacle, through a `bash -c exec radosgw`
+wrapper, and the store's `rgwCommandFlags`, appended last.
+`--service-unique-id` exists only at main, gated on 19.2.4 and 20.2.1 or
+later; v1.20.7 does not pass it.
+
+Rook also writes `rgw_zone`, `rgw_zonegroup`, `rgw_run_sync_thread`,
+`rgw_log_nonexistent_bucket`, `rgw_log_object_name_utc` and
+`rgw_enable_usage_log` into the mon config store for the daemon's own
+section through `config assimilate-conf`: those six keys and, when the
+store spec asks, keystone, swift and any `rgwConfig` key; with wire
+encryption on, it sets the `ms_*_mode` options to secure globally. The
+daemon reads every key the store delivers for its section, not a fixed
+list. `rgw_run_sync_thread` is written `true` unless the store disables
 multisite sync traffic, so the gateway honors the option as a no-op on a
 single-zone zonegroup rather than relying on Rook to turn it off; and
-`rgw_enable_apis` reaches the daemon only when the store spec sets it or
-disables S3, so the default list, swift included, is radosgw's own.
+`rgw_enable_apis` reaches the daemon only when the store spec sets it,
+disables S3 or sets the Swift URL prefix to `/`, so otherwise the
+default list, swift included, is radosgw's own. `docs/exclusions.md`
+records both since 4312a7a.
 
-rgw-rs therefore accepts radosgw's argv, as rgw-go does. What rgw-go gets
-from librados here, rgw-rs must do itself, and that is the largest
-single difference in cost between the two projects:
+Rook's `ceph.conf` is the `config` key of the `rook-config-override`
+ConfigMap, mounted at `/etc/ceph/ceph.conf`: usually an empty `[global]`,
+and where a user's overrides arrive. The container's environment carries
+`POD_NAME`, `POD_NAMESPACE`, `NODE_NAME`, `CONTAINER_IMAGE`, the resource
+limits, `ROOK_CEPH_MON_HOST`, `ROOK_CEPH_MON_INITIAL_MEMBERS`,
+`ROOK_MSGR2`, `CURL_CA_BUNDLE` when a CA bundle is referenced, and
+`CEPH_USE_RANDOM_NONCE=true`, which in Ceph changes only a daemon's
+messenger, a client's nonce being random already; rados-rs chooses its
+client nonce differently from librados, and one cluster test covers it.
 
-- Ceph's early arguments, the entity's `ceph.conf` sections (own name,
-  then type, then global, which rados-rs already reads), `CEPH_ARGS`,
-  which rados-rs does not read, and the generic `--<option>` and
-  `--<option>=<value>` argv forms.
-- The mon config store. rados-rs subscribes to `config` and decodes the
-  `MConfig` message but keeps only four of its own client options and
-  discards the rest; there is no way to read a value and no wait for the
-  first message, where radosgw exits if it cannot fetch its config.
-  Exposing the resolved values and the initial wait is the first rados-rs
-  package in section 14. The mon sends values already resolved for the
-  entity's section chain, so nothing beyond that is needed to see what
-  Rook set.
+rgw-rs therefore accepts radosgw's argv, as rgw-go does. rgw-go parses
+the early arguments and `CEPH_ARGS` itself and gets the rest from
+librados: the generic `--<option>` forms, every `rgw_*` option, and the
+mon config store applied during connect; rgw-rs must do all of it, and
+that is the largest single difference in cost between the two projects.
+Under Rook the minimum is:
+
+- The generic `--<option>` and `--<option>=<value>` argv forms, with `-`
+  and `_` equivalent, which every flag Rook passes is; among them `--id`,
+  `--keyring`, `--mon-host`, `--mon-initial-members`, `--setuser` and
+  `--setgroup`.
+- The mounted `ceph.conf`, with the entity's sections (own name, then
+  type, then global), which rados-rs already reads.
+- The mon config store for the daemon's section. rados-rs subscribes to
+  `config` and decodes the `MConfig` message but keeps only four of its
+  own client options and discards the rest; there is no way to read a
+  value and no wait for the first message, where radosgw exits if it
+  cannot fetch its config. Exposing the resolved values and the initial
+  wait is gap 1, a rados-rs package that lands before phase 1's first
+  `rgwd` package (section 14). The mon sends values already resolved for
+  the entity's section chain, so nothing beyond that is needed to see
+  what Rook set.
 - Ceph's documented precedence, last wins: compiled default, mon config
-  store, local config file, environment, command line.
+  store, local config file, environment, command line; a mon value never
+  replaces one set locally.
+
+`CEPH_ARGS`, `CEPH_CONF` and `CEPH_KEYRING`, which Ceph reads from the
+environment and rados-rs does not, are not set by Rook: they are parity
+items, not requirements.
 
 rgw-rs carries the defaults of the `rgw_*` options it honors, copied from
-the floor release's option table with their source recorded; an option it
-does not honor, the mime-types file among them, is logged once and
-ignored. Privileges drop before the connection is made, as radosgw does.
-The beast keys and their handling, and JSON logging to stderr through
-`tracing`, are as rgw-go specifies them.
+the floor release's option table with their source recorded, and
+radosgw's own default overrides in `rgw_main.cc`, which set the
+objecter's in-flight cap to 24576 and require a secure monitor
+connection; the messenger-mode package, gap 8, is what lets the client
+honor the latter. An option it does not honor, the mime-types file among
+them, is logged once and ignored. Configuration load refuses a GC,
+lifecycle or usage shard count below 1 (`rgw_gc_max_objs`,
+`rgw_lc_max_objs`, `rgw_usage_max_shards`) rather than faulting on first
+use (rados-rs registry, CEPH-BUG-019). radosgw connects to the monitors
+and RADOS as the launching user, binds its frontends, and only then drops
+to `--setuser`/`--setgroup` inside the beast frontend's init, so
+privileged ports still bind; rgw-rs keeps that order. JSON logging goes
+to stderr through `tracing`.
+
+The frontend parses beast's keys, pinned here rather than deferred to
+rgw-go: `port`, `endpoint`, `ssl_port`, `ssl_endpoint`,
+`ssl_certificate`, `ssl_private_key`, `ssl_options`, `ssl_ciphers`,
+`ssl_ciphersuites`, `ssl_reload`, `prefix`, `tcp_nodelay`,
+`request_timeout_ms`, `max_connection_backlog` and `max_header_size`,
+with `config://` values for the TLS keys; `ssl_reload` is Squid's alone
+and Tentacle adds `so_reuseport`. Rook mounts its certificate Secret's
+`cert` key, the key, certificate and CA concatenated, and passes
+`ssl_certificate` with no `ssl_private_key` unless the Secret is
+TLS-typed, plus optional `ssl_options`, `ssl_ciphers`,
+`ssl_ciphersuites` and `tls_groups`, the last of which neither release's
+beast reads and rgw-rs treats as radosgw does. Phase 1 therefore loads a
+combined PEM from `ssl_certificate` alone.
 
 Rook's probes shape the first request the gateway ever answers: there is
 no liveness probe, and the startup and readiness probes are exec probes
-that curl `/` on the frontend port and pass on any status from 200 to
-399, on 503, and for readiness on 500. rgw-rs answers an anonymous
-`GET /` exactly as radosgw does. The operator marks the store ready at the
-end of its reconcile without an HTTP check of its own; the suite's canary
-is a CephObjectStoreUser becoming ready, which exercises the admin API
-through the operator's `rgw-admin-ops-user`.
+that curl `/` on the frontend port, or `/swift/info` when S3 is off, and
+pass on any status from 200 to 399, on 503, and for readiness on 500.
+rgw-rs answers an anonymous `GET /` as radosgw does: a 200 whose body is
+radosgw's empty `ListAllMyBucketsResult` and carries nothing internal.
+The operator marks the store ready at the end of its reconcile without an
+HTTP check of its own; the suite's canary is a CephObjectStoreUser
+becoming ready, which exercises the admin API through the operator's
+`rgw-admin-ops-user`.
+
+Metrics reach Rook through ceph-exporter, which reads the admin sockets
+in `/run/ceph`, mounted into the RGW pod from the host; Rook defines no
+RGW ServiceMonitor. rgw-rs answers on an admin socket at
+`/run/ceph/ceph-client.rgw.<store>.<letter>.<pid>.asok` with
+`counter dump` and `counter schema`, and `perf dump` for the toolbox, in
+phase 3, where rgw-go places its admin-socket counters. The mgr's service
+map and perf reports are gap 7, in phase 1.
 
 ## 6. Data path
 
@@ -257,13 +331,16 @@ sequence as radosgw's atomic write does.
   whatever the messenger's framing demands, which the benchmark measures.
 - **Submission backpressure is a future, not a blocked thread.**
   rados-rs bounds in-flight operations and bytes at the client with a
-  tokio semaphore, defaulting to the objecter's 1024 operations and
-  100 MiB, and a submit awaits its permit. rgw-rs keeps
+  tokio semaphore, defaulting to the objecter's compiled 1024 operations
+  and 100 MiB, where radosgw overrides the operation cap to 24576, which
+  rgw-rs sets for parity; a submit awaits its permit. rgw-rs keeps
   `rgw_max_concurrent_requests`, 1024, as a hard cap on requests and
-  bounds body memory with a byte budget, as rgw-go does. Whether an
-  operation larger than the byte budget can ever be admitted, as the
-  C++ throttle admits it when nothing else is in flight, is unverified
-  and belongs to the gap package.
+  bounds body memory with a byte budget, as rgw-go does. An operation
+  larger than the byte budget is never admitted today (tokio's
+  `acquire_many` past the semaphore's total permits never completes),
+  where the C++ throttle admits it once nothing else is in flight. That
+  is a rados-rs defect, fixed in gap 6's package, which clamps or admits
+  it. Four-mebibyte chunks never approach it.
 - **Cancellation is drop, and drop does not cancel.** A client
   disconnect drops the request's future and every op future it owns.
   rados-rs releases the throttle permit at once but keeps the operation
@@ -276,11 +353,15 @@ sequence as radosgw's atomic write does.
 - **Metadata cache.** Decoded users, bucket entry points, bucket
   instances with attributes and zone configuration, radosgw's 25000
   entries with its 900 second expiry, watching the control pool's notify
-  objects and sending the same notify on every metadata write. A watch
+  objects and sending the same notify, with its full record, on every
+  metadata write. The cache handles an UPDATE_OBJ notify by invalidating
+  the named entry and re-reading it, never by applying the payload it
+  carries, a deliberate difference from radosgw (section 16). A watch
   that reports itself broken is delivered as an event on the watcher,
-  which is the error channel rgw-go had to add; rados-rs reconnects it
-  on session resets, map changes and every five seconds while in error,
-  and after a not-connected error the driver watches again.
+  which rgw-go's seam forwards from go-ceph's own channel; rados-rs
+  reconnects it on session resets, map changes and every five seconds
+  while in error, and after a not-connected error the driver watches
+  again.
 - **Workers**, each a tokio task under one cancellation token, with
   rgw-go's per-phase set: phase 1 has the GC processor with radosgw's
   locks, the usage-log flush, the index-completion retry worker, watch
@@ -303,13 +384,16 @@ control pool `<z>.rgw.control`; a separate OTP pool `<z>.rgw.otp`; and per
 placement `<z>.rgw.buckets.index`, `.data` and `.non-ec` for data-extra.
 Tentacle adds a dedup pool and `restore` and `logging` log namespaces,
 which is the zone's version bump. A pool name carries its namespace after
-a colon with a backslash escape, and Rook's zoned store maps every shared
-pool that way, `<pool>:<store>`. Every object is placed by pool,
-namespace and locator key; in rados-rs, as in librados, namespace and
-locator belong to the I/O context, not to the operation, and a context
-clone is cheap, so the driver clones per namespace and, for the objects
-that need one, per locator, until the gap package adds a per-operation
-form.
+a colon with a backslash escape, and Rook's zoned store maps every zone
+pool field to `<pool>:<store>.<suffix>` with a suffix table of its own
+that differs from Ceph's defaults (`account` for `accounts`,
+`bucket-logging` for `logging`), so the driver takes every pool and
+namespace from the zone record and never from the defaults. Every object
+is placed by pool, namespace and locator key; in rados-rs, as in
+librados, namespace and locator belong to the I/O context, not to the
+operation, and a context clone costs an `Arc` and two strings, so the
+driver clones per namespace and, for the objects that need one, per
+locator, until the gap package adds a per-operation form.
 
 **Object naming.** The bucket instance is `.bucket.meta.<bucket>:<id>`,
 with the tenant and a colon before the bucket name when there is one, in
@@ -317,8 +401,9 @@ the domain root; the entry point is `<bucket>`, or `<tenant>/<bucket>`,
 beside it. Index shards are `.dir.<id>.<shard>`, `.dir.<id>.<gen>.<shard>`
 once a generation is above zero, and `.dir.<id>` unsharded, keyed on the
 bucket id, in the placement's index pool. A head is `<marker>_<oid>` in
-the data pool, where the oid is `_` plus the name when the name starts
-with `_`, and then the locator is set to that name, and otherwise
+the data pool. With an empty namespace and no instance encoded, the oid
+is the name, or `_` plus the name when the name starts with `_`, and
+then the locator is `<marker>_<name>`; otherwise the oid is
 `_<ns>[:<instance>]_<name>`. Tails are `<marker>__shadow_.<32 random
 characters>_<n>` for a plain object and `<marker>__multipart_<name>.<upload
 id>.<n>` for a part's first stripe, with `.<n>_<m>` shadow stripes after
@@ -334,7 +419,9 @@ each index holding a bare user-id record. The root pool holds
 `realms.<id>.control`, `periods.<id>.<epoch>`, `periods.<id>.latest_epoch`,
 `period_config.<realm>`, `default.zone.<realm>`, `default.zonegroup.<realm>`
 and `default.realm`. GC shards are `gc.<n>`, lifecycle shards `lc.<n>`,
-usage shards `usage.<n>`, reshard logs `reshard.<n>`.
+usage shards `usage.<n>`, reshard logs `reshard.<n>` with `<n>`
+zero-padded to ten digits, `reshard.0000000000` to `reshard.0000000015`
+by default.
 
 **Metadata types and their versions.** The gateway itself reads and
 writes these, so the encoding rule applies in full:
@@ -357,6 +444,11 @@ writes these, so the encoding rule applies in full:
 The last two are class-written and belong to rados-cls; they are in the
 table because a Tentacle OSD re-encodes the header at 8 while Squid
 corpus objects are 7, and the driver's listing sees both on one cluster.
+Three Squid types declare a decode maximum one below their own encoder:
+RGWObjManifest encodes at 8 and declares 7, rgw_bucket_dir_header 7 and
+6, and the index entry's metadata record 7 and 6; section 10 gives the
+consequence. RGWCacheNotifyInfo, like the central types, uses the legacy
+compat-length framing.
 
 **Class calls by path.** The encodings are rados-cls's; the driver
 decides which call goes on which path, as section 6 lists for the data
@@ -367,9 +459,11 @@ shard count is the smaller of `rgw_gc_max_objs`, default 32, and the
 shard prime 65521; lifecycle shards capped at 7877; usage with 32 shards
 and one per-user shard; the locks `gc_process`, `lc_process` and
 `reshard_process` by name. Modifying methods that return data run with
-the return-vector flag on the same operation; rados-cls already does this
-for the user-stats reset and the 2pc queue reserve, so persistent
-notifications are not gated on a client item here.
+the return-vector flag on the same operation, whose reply the OSD caps
+at 64 bytes per op (`osd_max_write_op_reply_len`), failing with
+EOVERFLOW beyond it; rados-cls already does this for the user-stats
+reset and the 2pc queue reserve, so persistent notifications are not
+gated on a client item here.
 
 **Watch and notify.** The control pool holds `notify.<i>` for `i` below
 `rgw_num_control_oids`, default 8; a metadata object's notify goes to the
@@ -379,26 +473,50 @@ metadata write it makes, so radosgw and radosgw-admin see its writes and
 it sees theirs. Without this a shared zone is unsafe; with the cache
 disabled it is merely slow.
 
-**Gaps in rados-rs this map depends on**, each a rados-rs package before
-the driver step that needs it:
+**Gaps in rados-rs this map depends on**, each a rados-rs package landed
+before the gateway package that first needs it; section 14 schedules
+them:
 
 1. The mon config store's values exposed and awaited (section 5).
-2. An explicit modification time and write flag on a built operation: a
-   class call sent alone is flagged as a read and carries mtime zero,
-   where radosgw's class writes set the object's mtime; the OTP module's
-   own docs already say a driver must.
-3. Resend with the same transaction id after a connection loss: today a
-   lost connection resubmits under a fresh id, which defeats the OSD's
-   duplicate detection and can run a non-idempotent write twice, a
-   refcount get, a usage add, a GC enqueue or a queue reserve among them,
-   where the C++ objecter resends with the same id.
+2. An explicit modification time on a built operation, and a write marker
+   on rados-cls's modifying calls: flags come from opcodes and CALL is a
+   read opcode, so a class call sent alone goes out READ-flagged with
+   mtime zero and the OSD leaves the object's mtime unchanged;
+   `OpBuilder::flags(WRITE)` already forces the flag, but no rados-cls
+   helper sets it and no API takes the mtime radosgw passes on copies and
+   OTP writes. The OTP module's own docs already say a driver must.
+3. In-flight operations must be resent under their original transaction
+   id after a connection loss, as the C++ objecter does, so the OSD's
+   duplicate detection applies; a rados-rs fix is in flight
+   ([jhoblitt/rados-rs#28](https://github.com/jhoblitt/rados-rs/pull/28),
+   in review), and rgw-rs pins it with a test rather than planning it.
 4. A per-operation namespace and locator on the I/O context's operations,
-   or the clone pattern documented as the contract.
-5. In `denc`: the legacy compat-length framing, and a decode mode that
-   accepts a struct version above the type's own, skipping the tail, as
-   the C++ decoders do (section 10).
-6. Small items: a truncate step constructor; the oversized-operation
-   throttle question; a bounded watch-event channel.
+   or the clone pattern documented as the contract. The raw form exists:
+   the client's submission by object id is public, and the id carries
+   namespace and key. What is missing is the I/O-context form that
+   rados-cls's helpers, which take a context, can use.
+5. In `denc`: a decode mode that separates the compat guard from the
+   accepted struct version, accepting a struct version above the type's
+   own and skipping the tail as the C++ decoders do (needed by package 8
+   for Squid's own manifests); and the legacy compat-length framing,
+   needed by the rule only (section 10).
+6. Small items: a truncate step constructor; builder steps for xattr get,
+   set, remove and list and for a class call, which today go through raw
+   op constructors; a `stat2` step, which radosgw's head read composes; a
+   class call charged to the operation budget, which today charges it
+   nothing; a bounded watch-event channel; and admission of an operation
+   larger than the byte budget, a defect today (section 7).
+7. A mgr client: `MMgrOpen`/`MMgrReport` with service-daemon registration
+   and status, so rgw-rs appears in the service map with radosgw's
+   metadata and reports its perf counters. Without it `ceph status`, the
+   dashboard's RGW discovery and the prometheus module's `ceph_rgw_*`
+   metrics see no rgw, and rgw-go's harness, which finds the daemon
+   through `ceph service dump`, fails. rgw-rs's harness is rooket plus
+   Rust and does not depend on `ceph service dump`.
+8. The messenger modes, `ms_client_mode` and `ms_mon_client_mode`,
+   honored by the client, with radosgw's defaults, which require a secure
+   monitor connection. In flight in rados-rs, and a dependency of the
+   driver's connect.
 
 ## 9. Coexistence with C++ radosgw on the same cluster
 
@@ -421,7 +539,8 @@ release. Two facts sharpen them here:
   proxied into the mgr's command-proxy container, which runs the
   cluster's own image. On a Squid cluster without Multus `zone_info` is
   therefore Tentacle-encoded, RGWZoneParams at 18 where Squid writes 15,
-  and the zonegroup's placement tiers at 4 where Squid writes 1. The
+  and the zonegroup's placement tiers, which Rook's stores do not define,
+  would be at 4 where Squid writes 1. The
   decode rule covers it; a gateway that rewrites either object writes
   the cluster release's encoding, as the cluster's own radosgw would,
   and the gate holds it to that.
@@ -436,8 +555,9 @@ registries, all verified there at v19.2.6 or later: the packed-value
 encoding of exactly 65536 as 0, reproduced for byte identity; the usage
 trim that never finishes on payer-keyed or bucket-filtered records,
 so every trim loop is bounded; the 2pc queue's inexact reserved size and
-its reservation id 0; the queue-registry listing that a Squid radosgw
-never pages past 1024 entries; the stale epoch a cancelled index
+its reservation id 0; the queue-registry listing that a radosgw before
+20.2.3, every Squid release included, never pages past 1024 entries; the
+stale epoch a cancelled index
 completion writes; the delete-marker refusal on OSDs before 19.2.3;
 the version class returning ECANCELED where its header says EAGAIN; the
 lock class's EIO on an expired ephemeral lock; the OTP class's
@@ -465,9 +585,12 @@ Consequences for `rgw-meta`, each checked against what rados-rs offers:
 
 - The `rados` crate's versioned framing is the standard one: a version
   byte, a compat byte and a length. The legacy compat-length framing,
-  whose old versions carry no length field, is not implemented, and
-  RGW's central types need it for their oldest corpus objects; it is gap
-  5 above.
+  whose pre-length versions carry no compat or length byte, is not
+  implemented. No object in the corpus at any archive needs it (every
+  RGW type's oldest corpus version is at or above its length version),
+  so it is required by the encoding rule for metadata written before
+  those versions, proven by generated vectors, and never by the gate; it
+  is the second half of gap 5.
 - The derive handles only a single fixed version; a type with
   version-gated fields implements the trait by hand, as rados-cls does
   for some thirty of its own. RGWUserInfo, RGWBucketInfo, the zone types
@@ -475,11 +598,17 @@ Consequences for `rgw-meta`, each checked against what rados-rs offers:
   hand-written encoders, and the goldens prove each.
 - The crate's versioned decode refuses a struct version above the type's
   declared maximum, where C++ refuses only a compat above its own and
-  skips the unknown tail. The rule to decode every version the C++
-  accepts, and to survive the next release's bump, means `rgw-meta`
-  keeps the trait's open maximum and skips trailing fields; the gap
-  package makes that the documented mode rather than an accident of a
-  default.
+  skips the unknown tail. One maximum guards both checks, so leaving it
+  open drops the compat guard as well. The rule to decode every version
+  the C++ accepts, and to survive the next release's bump, means
+  `rgw-meta` needs a mode that keeps the compat guard, accepts a newer
+  struct version and skips trailing fields; the first half of gap 5 adds
+  it. The mode is `rgw-meta`'s only: rados-cls's decoders stay closed by
+  the fork's rule, since class replies decode at the OSD's version.
+  Squid itself is the proof: RGWObjManifest, rgw_bucket_dir_header and
+  rgw_bucket_dir_entry_meta encode one version above the number in their
+  own decode macro, so a decoder that treats that number as a maximum
+  rejects a Squid cluster's bytes.
 - The required release is a lossless byte in rados-rs, with the named
   constants Squid, Tentacle and Umbrella and any newer byte kept as is;
   `rgw-meta`'s encoders map a byte newer than they know to the newest
@@ -492,10 +621,10 @@ Consequences for `rgw-meta`, each checked against what rados-rs offers:
   last wins for struct-keyed maps and first wins for denc-traits maps and
   every unordered map, are documented on the decoders that could meet
   them.
-- The corpus archives from 0.61 through 19.2 carry RGWUserInfo,
-  RGWBucketInfo, the manifest, the index entry and the ACL policy at
-  every historical version; the zone parameters and the entry point from
-  15.0. Tentacle encodings have no corpus and rely on generated vectors.
+- The corpus carries RGWUserInfo, RGWBucketInfo, the manifest, the index
+  entry and the ACL policy in eight archives from 0.61.4 through 19.2,
+  and the zone parameters and the entry point in five from 15.0.0.
+  Tentacle encodings have no corpus and rely on generated vectors.
 
 ## 11. Error handling
 
@@ -530,49 +659,64 @@ Consequences for `rgw-meta`, each checked against what rados-rs offers:
 | Unit tests | nothing | `rgw-meta` encoders, `rgw-core` ops against fakes with the conformance suite, auth, policy, ACL, dispatch, the frontend in-process through hyper | `cargo test`, every PR |
 | Corpus and vector goldens | committed files only | every encoding in scope: each corpus object decodes to ceph-dencoder's JSON and re-encodes to its bytes at the Squid release; generated vectors for Tentacle encodings and for types the corpus lacks; unordered types compare after decoding | `cargo test`, every PR |
 | Cluster tests, `#[ignore]` | a rooket cluster | the driver's layout and protocols against a radosgw oracle, the live coexistence matrix, the admin API through Rook's own client, ceph/s3-tests comparative | on demand and at gates |
-| Rook end to end | kind, Rook main, the derived image | `TestCephObjectSuite`, both passes | nightly and at gates |
+| Rook end to end | a bare kind cluster, Rook main, the derived image | `TestCephObjectSuite`, both passes | nightly and at gates |
 
 Details and decisions:
 
 - **Goldens.** rgw-go's goldens are language-neutral: the corpus object,
   ceph-dencoder's JSON dump and ceph-dencoder's re-encoding at v19.2.6,
-  one triple per object, keyed by C++ type name, 98 types, 3376 triples.
-  rgw-rs uses that format. rados-rs's own corpus harness is the other
-  model: it compares against a live `ceph-dencoder`, taken from apt in
-  CI, with a closed type registry inside a non-published binary, so
-  rgw-rs cannot register its types there and copies the pattern into
-  `rgw-tests` instead. How the goldens are produced is owner decision 4.
+  one triple per object, keyed by C++ type name, 98 types, 3376 triples,
+  54 MB across seven packages, each at
+  `<pkg>/testdata/goldens/<Type>/<archive>/<object>.{bin,json,reenc}`.
+  rgw-rs uses that format and layout, per crate. The goldens are
+  generated by the `rgw-tests` binary: for each corpus object it runs the
+  toolbox's `ceph-dencoder` through `rooket kubectl exec` to produce the
+  JSON dump and the re-encoding at the cluster's release, and commits the
+  triple. Regeneration needs a rooket cluster per release; `cargo test`
+  needs only the committed files. The corpus is read at the commit Ceph
+  v19.2.6 pins. rados-rs's own corpus harness compares against a live
+  `ceph-dencoder` from apt in CI, with a closed type registry inside a
+  non-published binary; rgw-rs can register nothing there, and decision
+  4 keeps `cargo test` offline instead.
 - **The cluster.** rooket, as rgw-go and rados-rs already use it: released
   Rook v1.20.7 with one worker, the `host-network` profile from the first
   `up`, `cephImage.tag` pinned per release, the dashboard off and rooket's
   `rgw` profile unused so that every user and bucket count is exact,
-  `rooket wait`, and `rooket ceph-config --out` for the `ceph.conf` the
-  tests read through `CEPH_CONF`, which is how rados-rs's cluster suites
-  run today. The ambient cluster is never used. No make, bash or podman
-  plumbing is added: the pins live in rooket configuration directories
-  under `rgw-tests`, and the population and gate logic is Rust (owner
-  decision 4).
+  `rooket up --wait`, and `rooket ceph-config --out` for the `ceph.conf`
+  the tests read through `CEPH_CONF`, which is how rados-rs's cluster
+  suites run today. The ambient cluster is never used. No make, bash or
+  podman plumbing is added: the pins live in rooket configuration
+  directories under `rgw-tests`, and the population and gate logic is
+  Rust (decision 4).
 - **The phase 0 gate**, rgw-go's concept, not its code: populate the
   zone through the toolbox's radosgw-admin and an S3 client, then read
-  every metadata object from every pool and namespace, decode it with
-  nothing left over, re-encode it for the cluster's release, and require
-  the bytes radosgw wrote, or, for objects the operator's radosgw-admin
-  wrote at a newer release, the bytes the toolbox's ceph-dencoder writes
-  back; compare the decoded value, type-aware, with radosgw-admin's JSON;
-  and require exact per-object counts so that no pass is vacuous. rgw-go
-  reports that this is the order in which its real bugs surfaced.
+  the objects the layout names in each known namespace, and list the
+  root, index and data pools; decode each with nothing left over,
+  re-encode it for the cluster's release, and require the bytes radosgw
+  wrote, or, for objects the operator's radosgw-admin wrote at a newer
+  release, the bytes the toolbox's ceph-dencoder writes back; compare the
+  decoded value, type-aware, with radosgw-admin's JSON; and require
+  counts equal to the manifest's so that no pass is vacuous. rgw-go's
+  registry records its placement-target quirk as found by this gate.
 - **The Rook suite.** Its installer selects the Ceph image from a fixed
-  table keyed by `CEPH_SUITE_VERSION`, the floating `v19` and `v20` tags
-  and the ceph-ci devel tags; there is no variable for an arbitrary
-  image. Running it with a derived image therefore means either loading
-  the derived image onto the kind nodes under the table's name for that
-  release, or a one-line local patch to the framework, and the choice is
-  recorded with the workflow. The suite brings its own three-mon cluster
-  through Rook's installer with the dashboard on, reaches the gateway
-  from the runner through a Service of its own, administers it with
-  go-ceph's admin client as the `dashboard-admin` system user, and skips
-  TLS verification; it does not run on a rooket cluster, it runs on kind
-  as Rook's own CI does.
+  table keyed by `CEPH_SUITE_VERSION`, `quay.io/ceph/ceph:v19`, `v20` and
+  `v21` and the ceph-ci devel tags, and sets no pull policy, so a
+  non-`latest` tag already on a node is used as is; there is no variable
+  for an arbitrary image. The derived image is therefore loaded onto the
+  nodes under the table's name for its release, with the Rook checkout's
+  own image-import helper, as Rook's CI imports its images. The suite
+  brings its own three-mon cluster through Rook's installer with the
+  dashboard on, reaches the gateway from the runner through a Service of
+  its own, administers it with go-ceph's admin client as the
+  `dashboard-admin` system user, which exists because the dashboard is
+  on, and skips TLS verification. It runs every `radosgw-admin` in the
+  toolbox, so the derived image keeps the original `radosgw-admin`; its
+  first admin call is `GET /admin/info`. It runs on a bare kind cluster
+  from `rooket cluster create`, never on a rooket-deployed one (the chart
+  operator watches every namespace), through Rook's own installer and
+  image-import helper, with Rook main's operator built from the same
+  checkout, all driven from an rgw-rs workflow; nothing is added in make,
+  bash or podman.
 - **s3-tests** is comparative, as in rgw-go: the same suite against
   radosgw and rgw-rs on the same cluster with the same configuration, and
   the gate is an equal pass-and-fail set for the phase's groups.
@@ -595,203 +739,210 @@ Each package is one pull request, reviewed and merged before the next
 starts unless it says otherwise. Phase 0 is the plan to write next; its
 first package is small enough to plan in full.
 
-**Phase 0, foundations.** Gate: every metadata object a populated radosgw
-wrote decodes and re-encodes byte-identically on a Squid and a Tentacle
-rooket cluster, with exact counts.
+**Phase 0, foundations.** Gate: the metadata objects a populated radosgw
+wrote decode and re-encode byte-identically, or, for the objects the
+operator's newer radosgw-admin wrote, to the toolbox dencoder's
+re-encoding, on a Squid and a Tentacle rooket cluster, with counts equal
+to the populator's manifest. Phase 0 is rgw-go's with one deviation from
+decision 3: package 10, the driver's connection and release detection,
+is here rather than in phase 1, because the owner put the driver
+connection in the first milestone (decision 5), and the gate then
+exercises driver code. The gate still loads the zone in test code, as
+rgw-go's does.
 
-1. **Scaffold.** The workspace as decided in owner decisions 1 and 2:
-   the spike tagged and its crates removed, the five crates as empty
-   shells with their dependency edges, `rados` and `rados-cls` as a git
-   dependency pinned by revision, the gates in CI, workspace lints,
-   commitlint and Dependabot kept, `docs/` with this spec, the
+1. **Scaffold.** The workspace as decided in decisions 1, 2 and 8: the
+   spike tagged and its crates removed from `main`, with a README line
+   naming the tagged spike an insecure research prototype and
+   `FINDINGS.md` moved to `docs/`; the five crates as empty shells with
+   their dependency edges; `rados` and `rados-cls` as git dependencies
+   pinned by revision; the license, LGPL-2.1-or-later, with `cargo
+   deny`'s license policy to match; commitlint and Dependabot kept; the
+   gates and workspace lints added; `docs/` with this spec, the
    exclusions pointer and the empty defect registry. No behaviour.
-2. **rados-rs: `denc` framing and open-version decode** (gap 5), landed
-   in the fork first because package 3 cannot decode the oldest corpus
-   objects without it.
-3. **`rgw-meta` primitives, the golden helper and the corpus harness.**
-   The identity primitives and the small shared types, both framings
-   proven against the corpus.
-4. **User and account types.**
-5. **Bucket entry point, instance and layout**, with the opaque
+2. **rados-rs: `denc` open-version decode** (gap 5, first half), landed
+   in the fork first because package 8's manifest decoder rejects Squid's
+   own bytes without it.
+3. **`rgw-tests` golden generator and rooket configuration.** The
+   per-release rooket configuration directories (`config.yaml` with
+   `profiles: [host-network]`, `values/rook-ceph-cluster.yaml` pinning
+   `cephImage.tag` and `dashboard.enabled: false`), the binary that
+   drives `rooket up --rook-version v1.20.7 --workers 1 --config-dir …
+   --wait` and `rooket ceph-config --out`, and the generator that writes
+   the goldens in rgw-go's layout. Each `rgw-meta` package below commits
+   the goldens for its own types.
+4. **`rgw-meta` primitives and the corpus harness.** The identity
+   primitives and the small shared types, proven against their goldens.
+5. **User and account types.**
+6. **Bucket entry point, instance and layout**, with the opaque
    sub-records.
-6. **Zone parameters, zonegroup, realm, period and their defaults**,
+7. **Zone parameters, zonegroup, realm, period and their defaults**,
    including the tier and placement-target shapes at both releases and
    the STANDARD quirk pinned by a dencoder oracle.
-7. **Object attributes**: manifest, compression info, ACL policy
-   encoding, OLH info, cache-notify record.
-8. **rados-rs: the remaining gaps** (1 to 4 and 6), each its own fork
-   package on its own branch, landed before package 9. This is where the
-   seam's full surface is settled before the driver is written, which is
-   rgw-go's first lesson; rgw-go's retrofits, the version and pool id on
-   reads, the watch error channel, the local-versus-errno split and the
-   return-vector output, are already present in the fork and are pinned
-   by tests here rather than added.
-9. **`rgw-driver` foundation.** Connect from radosgw's argv, ceph.conf
-   and the mon config store; detect the release; load realm, zonegroup,
-   zone and period; resolve pools and namespaces; read and write system
-   objects with their versions.
-10. **`rgw-tests` harness and the gate.** The rooket configuration
-    directories per release, the Rust populator writing a manifest, and
-    the gate test.
-11. **Integration workflow**, nightly and on demand, one job per release,
+8. **Object attributes**: manifest, compression info, ACL policy
+   encoding, cache-notify record. OLH info arrives with versioning in
+   phase 2, as in rgw-go.
+9. **rados-rs gap packages, scheduled to their first user.** Gap 1 (mon
+   config store, exposed and awaited) before phase 1's first `rgwd`
+   package; gap 2 (explicit mtime and a write marker on rados-cls's
+   modifying calls) before the index protocol; gap 4 and gap 6 before
+   the driver's head writes and workers; gap 7 (the mgr client) in phase
+   1, before the Rook suite first runs; gap 8 (the messenger modes), in
+   flight, before package 10; gap 5's second half, the legacy framing,
+   before phase 0 closes, with generated vectors for each type that
+   declares it; gap 3 (same-tid resend) is being fixed in rados-rs
+   separately and is pinned here by a test, not planned. rgw-go's
+   retrofits — version and pool id on reads, the watch error channel,
+   the local-versus-errno split and return-vector output — are already in
+   the fork and are pinned by tests in package 10.
+10. **`rgw-driver` connection and release.** Connect from a `ceph.conf`
+    and keyring as rados-rs reads them today, detect the release, expose
+    the override flag.
+11. **`rgw-tests` populator and the gate.** The Rust populator writing
+    rgw-go's manifest, and the gate test.
+12. **Integration workflow**, nightly and on demand, one job per release,
     on rooket.
 
-**Phase 1, data path, auth and core admin; first benchmark.** rgw-go's
-phase 1 list, op for op, with three additions particular to rgw-rs: the
-hyper frontend with the beast spec and TLS is built here rather than
-inherited; the pipeline baseline replaces the seam microbenchmark; and
-placement targets and storage classes are served, because the Rook
-suite's zoned store declares two of each. Gates: s3-tests parity, Rook's
-admin client suite, the first gateway comparison, and the Rook suite as
-soon as the derived image serves a store.
+**Phase 1, data path, auth and core admin; first benchmark.** It opens
+with the site and system objects, as rgw-go's phase 1 does: load realm,
+zonegroup, zone and period; resolve pools and namespaces from the zone
+record; read and write system objects with their versions. Gap 1 lands
+before the first `rgwd` package, which brings radosgw's argv, the
+`ceph.conf` sections and the mon config store (section 5); gap 7 lands
+before the Rook suite first runs. The rest is rgw-go's phase 1 list, op
+for op, with three additions particular to rgw-rs: the hyper frontend
+with the beast spec and TLS, loading a combined PEM from
+`ssl_certificate` alone, is built here rather than inherited; the
+pipeline baseline replaces the seam microbenchmark; and placement targets
+and storage classes are served, because the Rook suite's store declares
+a second placement and a second storage class. The admin surface
+includes the suite's first call, `GET /admin/info`, and every call the
+operator makes: user get, create, modify and remove, user caps add and
+remove, user quota, bucket info, bucket listing, and the four account
+calls. Gates: s3-tests parity, Rook's admin client suite, the first
+gateway comparison, and the Rook suite as soon as the derived image
+serves a store.
 
 **Phase 2, versioning, lifecycle and bucket configuration**, and
 **phase 3, remaining services and workers**, are rgw-go's, with the
 2pc-queue, lock and OTP work already in rados-cls rather than pending.
+Phase 3 includes the admin socket with the counters ceph-exporter
+scrapes, as rgw-go places them (section 5).
 
 ## 15. Owner decisions
 
-**1. Evolve the spike or start fresh.**
+Recorded by the owner on 2026-09-27. Each decision states the chosen
+option, then the options rejected, one line each.
 
-- A. Evolve in place. Cost: the spike's shapes are load-bearing in every
-  crate: axum routing, a body buffered to verify it, SQLite behind the
-  trait, tenants hard-wired empty, no virtual hosts, no version instance
-  honored, and AWS's rather than radosgw's signature behaviour. Reworking
-  8.5k lines costs more than the parts worth keeping, and the tree keeps
-  a README that calls itself throwaway.
-- B. Fresh tree in the same repository: tag the spike, replace the tree
-  in the scaffold package, and salvage by copying named pieces: the
-  SigV4 core with its AWS vectors, the error table's shape, the XML
-  structs and the whitespace-preserving multi-delete parser, range
-  parsing, bucket-name validation, the in-process AWS SDK test harness,
-  and the conformance-suite idea. FINDINGS.md stays under `docs/` as
-  history. Cost: one large scaffold PR.
-- C. A new repository and a renamed spike. Cost: loses the name, history
-  and scorecard for no gain over B.
+**1. A fresh tree in the same repository.** The scaffold package tags the
+spike and removes it from `main`, with a README line naming the tagged
+spike an insecure research prototype; `FINDINGS.md` moves from the
+repository root to `docs/` as history. Named pieces are salvaged by
+copying: the SigV4 core with its AWS vectors, the error table's shape,
+the XML structs and the whitespace-preserving multi-delete parser, range
+parsing, bucket-name validation, the in-process AWS SDK test harness,
+and the conformance-suite idea. The cost is one large scaffold PR.
+Rejected:
 
-Recommendation: B.
+- Evolve in place: the spike's shapes are load-bearing in every crate
+  and cost more to rework than the parts worth keeping.
+- A new repository and a renamed spike: loses the name, history and
+  scorecard for no gain.
 
-**2. Repository layout and crate structure.**
+**2. Five crates**, cut on what tests without a cluster and what changes
+together: `rgw-meta`, `rgw-core`, `rgw-driver`, `rgwd`, `rgw-tests`
+(section 4). `rgw-core` is large, and its modules carry the internal
+structure. Rejected:
 
-- A. The spike's eleven crates, one per C++ file family. Cost: every op
-  touches four crates; the split follows C++ files rather than build or
-  test boundaries.
-- B. Five crates cut on what tests without a cluster and what changes
-  together: `rgw-meta`, `rgw-core`, `rgw-driver`, `rgwd`, `rgw-tests`
-  (section 4). Cost: `rgw-core` is large; its modules carry the internal
-  structure.
-- C. One crate. Cost: no compile-time enforcement of dependency
-  direction, and every test build compiles the driver.
+- The spike's eleven crates, one per C++ file family: every op touches
+  four crates.
+- One crate: no compile-time enforcement of dependency direction, and
+  every test build compiles the driver.
 
-Recommendation: B.
+**3. Mirror rgw-go's layer map, phase order and gates**, differing only
+where rados-rs or Rust removes a layer or moves a cost, with the
+differences listed in section 16 and kept current, plus one deviation:
+the driver's connection and release detection, package 10, is in phase
+0 (decision 5). Rejected:
 
-**3. How closely to mirror rgw-go's architecture and phasing.**
+- Mirror package for package: inherits Go-shaped decisions that do not
+  apply, the seam crate and the completion modes above all.
+- An independent design, such as the spike's data-path-first staging:
+  gives up the byte-exact gate before the data path and weakens the
+  comparison.
 
-- A. Mirror closely: same package map, same phases, same gates, same op
-  order. Benefit: plans transfer and the benchmark isolates language and
-  client. Cost: inherits Go-shaped decisions that do not apply, the seam
-  crate and the completion modes above all.
-- B. Mirror the layer map, the phase order and the gates; differ exactly
-  where rados-rs or Rust removes a layer or moves a cost, with the
-  differences listed in section 16 and kept current.
-- C. An independent design, for example the spike's data-path-first
-  staging. Cost: discards rgw-go's evidence that the byte-exact gate is
-  where the bugs are, and weakens the comparison.
+**4. Rook's `TestCephObjectSuite` is the shared acceptance gate**, the
+S3-level gate for both projects, with rgw-rs's own phase gates beneath
+it: the byte-exact metadata gate on rooket in phase 0, s3-tests parity
+from phase 1. The harness is rooket plus Rust only: the per-release
+rooket configuration directories live in `rgw-tests`, a small binary
+drives `rooket up --wait` and `rooket ceph-config`, a Rust populator
+writes metadata through the toolbox's radosgw-admin and data through the
+AWS SDK, and the goldens are generated by the same binary running
+ceph-dencoder through `rooket kubectl exec` into the toolbox, so no make,
+bash or podman plumbing is added. rgw-go's manifest schema and golden
+layout are taken verbatim, so the two gates can compare. Rejected, for
+the gate:
 
-Recommendation: B.
+- rgw-go's gate reused: it is Go and drives rgw-go's encoders; only its
+  concept transfers.
+- s3-tests parity alone: never exercises Rook's operator interactions,
+  which is what "drop-in" means.
 
-**4. The gate, and sharing rgw-go's harness.**
+Rejected, for the harness:
 
-The acceptance gate:
+- rgw-go's scripts and goldens referenced from a pinned checkout: a
+  cross-repository test dependency, with scripts and a gate that assert
+  rgw-go's own cluster name.
+- The populator ported to Rust and the goldens copied once: two
+  manifests that drift, and goldens regenerated only when rgw-go
+  regenerates them.
+- No committed goldens, a CI corpus job against the apt ceph-dencoder as
+  rados-rs does: the apt release decides the re-encode version, and
+  `cargo test` no longer proves encodings offline.
 
-- A. Rook's `TestCephObjectSuite` as the shared S3-level acceptance gate
-  for both projects, with rgw-rs's own phase gates beneath it: the
-  byte-exact metadata gate on rooket in phase 0, s3-tests parity from
-  phase 1. Cost: the suite's image selection needs a retag or a local
-  patch (section 12).
-- B. rgw-go's gate reused. Not available as code: it is Go and drives
-  rgw-go's encoders. Only its concept transfers.
-- C. s3-tests parity alone. Cost: never exercises Rook's operator
-  interactions, which is what "drop-in" means.
+**5. The first milestone is rgw-go's phase 0 plus package 10**: stored
+types, the driver's connection and release detection, and the byte-exact
+gate on both releases, with package 1 as the first PR to plan in full.
+No S3 request is served until phase 1. Rejected:
 
-Recommendation: A.
-
-Sharing rgw-go's language-neutral pieces, its `hack/rooket` scripts, the
-populator with its manifest, and its goldens, touches the owner's rule
-against new make, bash or podman cluster plumbing in this repository:
-
-- A. Reference rgw-go's scripts and goldens in place, from a pinned
-  checkout. Cost: a cross-repository test dependency that CI must clone;
-  the scripts name the cluster `rgw-go-<release>` and rgw-go's gate
-  asserts that name; goldens as a git dependency of tests.
-- B. Port the population step to Rust in `rgw-tests` and copy the
-  goldens once. Cost: about five hundred lines, and two manifests that
-  drift unless their schema is shared; fifty-odd megabytes of goldens in
-  the repository, regenerated only when rgw-go regenerates.
-- C. rooket plus Rust for everything: the per-release rooket
-  configuration directories live in `rgw-tests`, a small `xtask`-style
-  binary drives `rooket up`, `wait` and `ceph-config`, a Rust populator
-  writes metadata through the toolbox's radosgw-admin and data through
-  the AWS SDK, and the goldens are generated by the same binary running
-  ceph-dencoder through `rooket kubectl exec` into the toolbox, so no
-  podman is added. The manifest schema is copied from rgw-go's so the
-  two gates can compare. Cost: the largest port, and goldens depend on a
-  running cluster to regenerate.
-- D. As C for the cluster, but goldens as rados-rs does them: no
-  committed goldens, a corpus job in CI that compares against the
-  ceph-dencoder apt installs. Cost: the apt release decides the
-  re-encode version, CI needs the network for the corpus, and `cargo
-  test` no longer proves encodings offline.
-
-Recommendation: C, with the manifest schema and the golden layout taken
-from rgw-go verbatim.
-
-**5. The first milestone's scope.**
-
-- A. Phase 0 as above: stored types, the driver's connection and
-  release detection, the byte-exact gate on both releases. Cost: no S3
-  request is served until phase 1.
-- B. A data-path hello: one PUT and GET through the index protocol into
-  a real zone, with types modelled only as needed. Cost: encoding
-  shortcuts taken to reach it become the foundation, which is the
+- A data-path hello, one PUT and GET through the index protocol: the
+  encoding shortcuts taken to reach it become the foundation, the
   failure rgw-go's gate was built to catch.
-- C. Scaffold and `rgw-meta` only, no cluster. Cost: the rados-rs gaps
-  surface a milestone later.
+- Scaffold and `rgw-meta` only, no cluster: the rados-rs gaps surface a
+  milestone later.
 
-Recommendation: A, with package 1 as the first PR to plan in full.
+**6. tokio and hyper 1.x, with an own dispatcher, HTTP/1.1 only and TLS
+through rustls.** The runtime is tokio because rados-rs is. hyper-util's
+server carries the connections; the beast-spec server, per-request
+deadlines, header timeouts and drain are written by hand, about what
+rgw-go writes on net/http. HTTP/2 stays off because radosgw's beast
+frontend is HTTP/1.1 and every client in the gate speaks it. The rustls
+crypto provider is a build-time choice recorded in the scaffold package.
+Rejected:
 
-**6. Async runtime and HTTP stack.**
+- axum 0.8, as the spike: a tower and extractor layer on the hot path,
+  and a router that cannot express subresource dispatch, so the
+  dispatcher is written anyway.
+- actix-web: its own runtime model beside tokio-native rados-rs.
 
-The runtime is tokio: rados-rs is tokio and there is no second choice.
+**7. rados-rs as Cargo git dependencies**, `git =
+"https://github.com/jhoblitt/rados-rs"` with a `rev = ...` on the fork's
+`main`, for both `rados` and `rados-cls`, bumped by hand; Dependabot does
+not follow git revisions, which is rgw-go's situation with its go-ceph
+replace. The fork's `main` is what the rados-rs design says that branch
+is for; the choice is revisited when the fork's packages are upstream.
+Rejected:
 
-- A. hyper 1.x with hyper-util's server, an own dispatcher, HTTP/1.1
-  only, TLS through rustls. Cost: the beast-spec server, per-request
-  deadlines, header timeouts and drain are written by hand, about what
-  rgw-go writes on net/http.
-- B. axum 0.8, as the spike, with a fallback-only router. Cost: a tower
-  and extractor layer between the socket and the hot path; the router
-  cannot express subresource dispatch, so the dispatcher is written
-  anyway; `axum::serve` still needs the same hand-configured timeouts.
-- C. actix-web. Cost: its own runtime model beside tokio-native rados-rs.
+- crates.io: the fork's publish workflow publishes only `rados` and
+  `rados-denc-macros`, not `rados-cls`, and the fork's packages are not
+  upstream yet.
+- A git submodule with path dependencies: submodule hygiene in every
+  checkout and CI step, for no benefit.
 
-Recommendation: A. HTTP/2 stays off because radosgw's beast frontend is
-HTTP/1.1 and every client in the gate speaks it. The rustls crypto
-provider is a build-time choice recorded in the scaffold package.
-
-**7. How rgw-rs tracks rados-rs.**
-
-- A. A git dependency on the fork's `main`, pinned by revision and bumped
-  by hand, for both `rados` and `rados-cls`; Dependabot does not follow
-  git revisions, which is rgw-go's situation with its go-ceph replace.
-- B. crates.io. Cost: the fork's publish workflow is upstream's and
-  publishes only `rados` and `rados-denc-macros`; `rados-cls` is not
-  published anywhere, and the fork's packages are not upstream yet.
-- C. A git submodule with path dependencies. Cost: submodule hygiene in
-  every checkout and CI step, for no benefit over A.
-
-Recommendation: A, revisited when the fork's packages are upstream. The
-one git revision the gateway depends on is the fork's `main`, which is
-what the rados-rs design says that branch is for.
+**8. The license is LGPL-2.1-or-later**, the spike's, kept for the new
+tree and stated in the scaffold package. `cargo deny`'s license policy
+admits the licenses compatible with it; rados-rs's MIT is one. No
+alternative was recorded.
 
 ## 16. Learn from rgw-go: where rgw-rs deliberately differs
 
@@ -806,8 +957,9 @@ evidence. Each difference names what changes and why.
   What remains is RGW's types, which is `rgw-meta`.
 - **Class clients live in rados-cls, not in the gateway.** rgw-go decided
   the opposite, keeping class packages in rgw-go because Ceph ships no
-  installed client headers and go-ceph would not take them. The owner's
-  rados-rs design takes them, one class per feature, for upstreaming.
+  installed client headers, and only librados bindings go to the go-ceph
+  fork. The owner's rados-rs design takes them, one class per feature,
+  for upstreaming.
 - **Ownership instead of pinning.** go-ceph pins Go buffers for the life
   of an asynchronous operation and reaps them on cancellation, which is
   the class of silent-until-corrupting bug its seam tests run under the
@@ -821,10 +973,11 @@ evidence. Each difference names what changes and why.
 - **Return-vector on any operation**, so a modifying class method's
   output is not a fork item gating persistent notifications.
 - **Configuration is a cost, not a gift.** librados applies the mon
-  config store, `CEPH_ARGS` and every `rgw_*` option during connect;
-  rgw-go reads them back. rgw-rs implements the config sources and their
+  config store, the generic option forms and every `rgw_*` option during
+  connect; rgw-go parses only the early arguments and `CEPH_ARGS` and
+  reads the rest back. rgw-rs implements the config sources and their
   precedence itself, and the mon store first needs a fork package. This
-  is the one place where rgw-rs's foundations are larger than rgw-go's.
+  is the one place where rgw-rs's phase 1 is larger than rgw-go's.
 - **The cephx floor moves.** rgw-go supports only a librados at 19.2.6 or
   20.2.4 and later because those parse AES256KRB5 keys. rados-rs
   implements that cipher, so rgw-rs has no library floor and instead
@@ -838,24 +991,36 @@ evidence. Each difference names what changes and why.
   `#[ignore]`**, as rados-rs's are; there is no suite framework, and the
   conformance suite over the store traits is the analogue of rgw-go's
   counterfeiter fakes.
-- **The derived image is the release artifact**, not a binary archive:
-  no goreleaser equivalent is adopted, and the release workflow builds
-  the image per supported Ceph release with rgw-rs as `/usr/bin/radosgw`
-  and the original beside it, as rgw-go plans and has not yet built.
 
 What is mirrored on purpose: the layer map, the round-trip tables, the
 op-per-type pipeline with store traits at the consumer, the dispatch
 table with no router, the metadata cache design, the worker set per
 phase, the phase order and every gate, the goldens format, the rooket
-harness shape, the encoding rule, the exclusions, and the defect
-registry.
+harness shape, the encoding rule, the exclusions, the defect registry,
+and the derived image as the release artifact, built per supported Ceph
+release with rgw-rs as `/usr/bin/radosgw` and the original beside it, as
+rgw-go plans and has not yet built. rgw-go also keeps goreleaser
+archives; rgw-rs adopts no equivalent.
+
+Where rgw-rs deliberately differs from radosgw itself, beyond the
+STANDARD insertion section 9 declines to reproduce:
+
+- **An UPDATE_OBJ notify invalidates.** The metadata cache handles an
+  UPDATE_OBJ notify by invalidating the named entry and re-reading it,
+  never by applying the payload it carries. rgw-rs still sends the full
+  record on its own metadata writes, because radosgw applies it (rados-rs
+  registry, CEPH-BUG-017).
+- **Shard counts below 1 are refused.** Configuration load refuses a GC,
+  lifecycle or usage shard count below 1 (`rgw_gc_max_objs`,
+  `rgw_lc_max_objs`, `rgw_usage_max_shards`) rather than faulting on
+  first use (rados-rs registry, CEPH-BUG-019).
 
 ## 17. Risks and items to verify at implementation
 
-- **rados-rs gaps found late.** Six are known (section 8) and two of
-  them, the fresh transaction id on reconnect and the missing write
-  mtime, are correctness rather than convenience; anything else the
-  driver needs is found by package 8, before the driver depends on it.
+- **rados-rs gaps found late.** Eight are known (section 8) and two of
+  them, resending under the original transaction id and the write mtime,
+  are correctness rather than convenience; anything else the gateway
+  needs lands in the fork before the package that first needs it.
 - **Fork drift.** Every package of rados-rs is an upstream candidate;
   what upstream declines lives on at a rebase cost per upstream commit,
   and rgw-rs's pin follows the fork's `main`, not upstream's.
@@ -863,10 +1028,10 @@ registry.
   framing decodes nothing from a real cluster, and only the gate on a
   populated cluster catches the ones the corpus lacks; Tentacle
   encodings have no corpus and rely on generated vectors.
-- **The Rook suite's image selection**, which needs a retag or a patch
-  and is not yet exercised by rgw-go either, whose derived image is not
-  built; and the suite itself grows with Rook main, so the acceptance
-  target moves.
+- **The Rook suite's image selection**, which needs the derived image
+  loaded under the table's name and is not yet exercised by rgw-go
+  either, whose derived image is not built; and the suite itself grows
+  with Rook main, so the acceptance target moves.
 - **Release-keyed request shapes** wait for the operator to raise the
   required release during a rolling upgrade; accepted by the encoding
   rule, to be stated in the operator-facing docs.
@@ -882,11 +1047,14 @@ registry.
   `SignedHeaders`, as radosgw enforces; trailer signatures are verified;
   bodies stream under a budget and are never buffered to verify; the
   system and admin flags are set only by callers radosgw allows to set
-  them; secrets never derive `Debug`; the gateway's own cephx caps stay as
-  narrow as radosgw's need, because the control pool's notify channel is
-  trusted by every gateway in the zone. These are requirements of phase
-  1, and the reason the spike's auth crate is salvaged as an algorithm,
-  not as a middleware.
+  them, and the admin API's capability and system-flag checks match
+  radosgw's exactly; secrets never derive `Debug`; the anonymous `GET /`
+  answer is radosgw's empty `ListAllMyBucketsResult` and carries nothing
+  internal; the metadata cache handles an UPDATE_OBJ notify by
+  invalidating the named entry and never by applying the payload it
+  carries, and the gateway's cephx caps stay as narrow as radosgw's need.
+  These are requirements of phase 1, and the reason the spike's auth
+  crate is salvaged as an algorithm, not as a middleware.
 
 ## Appendix: evidence
 
@@ -904,7 +1072,7 @@ Ceph (`~/github/ceph`):
   `ENCODE_START(1, 1, bl)` (struct at :545); `v20.2.4:...:612`
   `ENCODE_START(4, 1, bl)` (struct at :591). RGWZoneGroupPlacementTarget
   3: `v19.2.6:...:609`, `v20.2.4:...:702`; STANDARD inserted on decode
-  `v19.2.6:src/rgw/rgw_zone_types.h:624-626`.
+  `v19.2.6:src/rgw/rgw_zone_types.h:625`, `v20.2.4:...:717-719`.
 - RGWUserInfo `(23, 9)`: `v19.2.6:src/rgw/rgw_common.h:624`,
   `v20.2.4:...:648`. RGWBucketEntryPoint `(10, 8)`:
   `v19.2.6:src/rgw/rgw_common.h:1119`, `v20.2.4:...:1162`.
@@ -915,6 +1083,16 @@ Ceph (`~/github/ceph`):
 - rgw_bucket_dir_entry `(8, 3)`: `v19.2.6:src/cls/rgw/cls_rgw_types.h:400`;
   rgw_bucket_dir_entry_meta `(7, 3)`: `:216`; rgw_bucket_dir_header
   `(7, 2)`: `v19.2.6:...:808`, `(8, 2)`: `v20.2.4:...:835`.
+- Decode maxima below the encoder, Squid: RGWObjManifest
+  `DECODE_START_LEGACY_COMPAT_LEN_32(7, 2, 2)`
+  `v19.2.6:src/rgw/driver/rados/rgw_obj_manifest.h:300`;
+  rgw_bucket_dir_entry_meta `(6, 3, 3)` `v19.2.6:src/cls/rgw/cls_rgw_types.h:232`;
+  rgw_bucket_dir_header `(6, 2, 2)` `:819`. C++ checks only the compat
+  version, `v19.2.6:src/include/encoding.h:1510-1521,1586-1595`, and
+  `DECODE_FINISH` skips to the end, `:1635-1641`. RGWCacheNotifyInfo's
+  legacy framing `v19.2.6:src/rgw/rgw_cache.h:115`; the full list of
+  legacy-framed types is `git grep DECODE_START_LEGACY_COMPAT_LEN v19.2.6
+  -- src/rgw src/cls/rgw`.
 - Pools and namespaces: `v19.2.6:src/rgw/rgw_zone.cc:1243-1262`
   (`".rgw.meta:root"` ... `".rgw.otp"` ... `".rgw.meta:groups"`),
   suffixes `:20-21,36`; v20.2.4 additions `:1285,1288,1301`. Root pool
@@ -954,10 +1132,16 @@ Ceph (`~/github/ceph`):
   `:1522`; `rgw_usage_max_user_shards` 1 `:1535`; `rgw_reshard_num_logs`
   16 `:2717`.
 - Shards and caps: `v19.2.6:src/rgw/driver/rados/rgw_gc.cc:28-29,35,42`;
-  `v19.2.6:src/rgw/driver/rados/rgw_tools.h:35-36,40-43` (7877, 65521,
-  `rgw_shards_max`); `v19.2.6:src/rgw/rgw_lc.cc:238,244-246`;
+  `v19.2.6:src/rgw/driver/rados/rgw_tools.h:35-36,40-43` (65521,
+  `rgw_shards_max`); lifecycle `HASH_PRIME` 7877 `v19.2.6:src/rgw/rgw_lc.h:27`,
+  cap `v19.2.6:src/rgw/rgw_lc.cc:237-239`, names `:244-246`;
   `v19.2.6:src/rgw/driver/rados/rgw_rados.cc:120,1626`;
-  `v19.2.6:src/rgw/driver/rados/rgw_reshard.cc:29-30,1326`.
+  `v19.2.6:src/rgw/driver/rados/rgw_reshard.cc:29-30`, `reshard.%010u`
+  `:1323-1329`.
+- Return-vector reply cap: `v19.2.6:src/osd/PrimaryLogPG.cc:4210-4225`;
+  `osd_max_write_op_reply_len` 64 `v19.2.6:src/common/options/global.yaml.in:3768`.
+  A zero mtime leaves the object's mtime unchanged:
+  `v19.2.6:src/osd/PrimaryLogPG.cc:8978-8983`.
 - Locks: `v19.2.6:src/rgw/rgw_op.cc:6431-6434` (`"RGWCompleteMultipart"`),
   `:6640`; `v19.2.6:src/rgw/driver/rados/rgw_sal_rados.cc:3737-3759`;
   `v19.2.6:src/rgw/rgw_lc.h:30` (`lc_process`);
@@ -980,35 +1164,82 @@ Ceph (`~/github/ceph`):
   `v19.2.6:src/msg/Message.h:69` (`MSG_CONFIG 62`),
   `v19.2.6:src/mon/ConfigMap.cc:145-163` (section chain),
   `v19.2.6:src/librados/RadosClient.cc:232`. Precedence:
-  `v19.2.6:doc/rados/configuration/ceph-conf.rst:47-60`.
+  `v19.2.6:doc/rados/configuration/ceph-conf.rst:47-60`,
+  `v19.2.6:src/common/config.h:31-37`; mon values ignored for locally set
+  options `v19.2.6:src/common/config.cc:277-330`. Environment:
+  `parse_env` `v19.2.6:src/common/config.cc:473-500` (`CEPH_ARGS`,
+  `CEPH_KEYRING`), called from `v19.2.6:src/global/global_init.cc:165`;
+  `CEPH_CONF` `config.cc:428`.
+- radosgw's defaults and start-up order: `v19.2.6:src/rgw/rgw_main.cc:79-86`
+  (`objecter_inflight_ops` 24576, `ms_mon_client_mode` secure,
+  `auth_client_required` cephx), `:100-102`
+  (`CINIT_FLAG_DEFER_DROP_PRIVILEGES`), `:143` (`init_storage`), `:165`
+  (`init_frontends2`); `v19.2.6:src/global/global_init.cc:320`; the drop
+  after bind `v19.2.6:src/rgw/rgw_asio_frontend.cc:598-615,770`.
+- Beast keys: `v19.2.6:src/rgw/rgw_asio_frontend.cc` (`config.find` and
+  `get_val` calls; `config://` `:775`); `so_reuseport`
+  `v20.2.4:src/rgw/rgw_asio_frontend.cc:652`, and no `ssl_reload` key
+  there; no `tls_groups` key in either (`git grep`).
+- Service map: `v19.2.6:src/rgw/driver/rados/rgw_rados.cc:1141-1171`
+  (`register_to_service_map`), `:1175` (status);
+  `v19.2.6:src/rgw/rgw_appmain.cc:421,493-494` (frontend metadata);
+  `v19.2.6:src/librados/RadosClient.cc:266,306-309` (MgrClient). Client
+  nonce: `v19.2.6:src/msg/Messenger.cc:33`.
+- Anonymous `GET /`: `v19.2.6:src/rgw/rgw_rest_s3.cc:4596-4602`,
+  `v19.2.6:src/rgw/rgw_common.cc:1290-1291`,
+  `v19.2.6:src/rgw/rgw_op.cc:2562` ("skipping list_buckets() for
+  anonymous user").
 - Unsigned-payload fallback: `v19.2.6:src/rgw/rgw_auth_s3.h:641-662`.
-- Corpus: `~/github/ceph/ceph-object-corpus` at 9670a0ef, archives listed
-  with `ls archive/*/objects/<type>`.
+- `ceph-dencoder` in `ceph-common`: `v19.2.6:ceph.spec.in:1718`,
+  `debian/ceph-common.install`.
+- Corpus: `~/github/ceph/ceph-object-corpus`, archives listed with
+  `ls archive/*/objects/<type>`. The goldens use the commit v19.2.6 pins,
+  6b15dbab. The evidence was read at the working tree's 9670a0ef, four
+  commits later, whose diff touches no RGW object; the checkout's HEAD
+  pins 44b11dd5, which is not used.
 
 Rook (`~/github/rook`):
 
-- Which radosgw-admin: `v1.20.7:pkg/operator/ceph/object/admin.go:239-274`
-  (Multus `:245-271`, local `:273-274`);
-  `v1.20.7:pkg/daemon/ceph/client/command.go:53-55`. Operator image:
+- Which radosgw-admin: `v1.20.7:pkg/operator/ceph/object/admin.go:235-278`;
+  `v1.20.7:pkg/daemon/ceph/client/command.go:52-55`. Operator image:
   `v1.20.7:images/ceph/Makefile:19` `CEPH_VERSION ?= v20.2.4-20260818`,
   `:22`, `Dockerfile:16`.
 - Launch: `dc7829268:pkg/operator/ceph/object/spec.go:446-459`
   (`radosgw`, `--foreground`, frontends, mime types, realm, zonegroup,
-  zone), `:474-483` (`--service-unique-id`), `:530-536` (ops log),
-  `:556-558` (`--rgw-enable-apis`), `:606-608` (`--host`);
-  `pkg/operator/ceph/controller/spec.go:366-380` (daemon flags);
-  `pkg/operator/ceph/object/config.go:65-125` (frontend string),
-  `:1180-1213`. Same flags at `v1.20.7:pkg/operator/ceph/object/spec.go:440-462`.
+  zone), `:474-483` (`--service-unique-id`, gated on 19.2.4 and 20.2.1),
+  `:518-528,560-576` (vault flags), `:530-536` (ops log), `:556-558`
+  (`--rgw-enable-apis`), `:589-604` (read-affinity wrapper), `:606-608`
+  (`--host`), `:611-613` (`rgwCommandFlags`), `:1180-1213`
+  (`rgw_enable_apis` forced by a `/` Swift prefix);
+  `pkg/operator/ceph/controller/spec.go:366-380` (daemon flags, `--id`
+  `:366-369`), `:380-398` (`--ms-bind-ipv4/6`);
+  `pkg/operator/ceph/object/config.go:65-125` (frontend string), `:77-96`
+  (TLS frontend keys, `ssl_private_key` only for a TLS Secret), `:99-127`
+  (TLS options), `:161-164` (`rgw.<store>.<letter>`);
+  `pkg/operator/ceph/config/store.go:148-152` (`--mon-initial-members`);
+  `pkg/operator/ceph/config/defaults.go:40-50` (logging flags).
+  `v1.20.7:pkg/operator/ceph/object/spec.go:436-462` has no
+  `--service-unique-id`.
+- `ceph.conf` and environment: `dc7829268:pkg/operator/ceph/controller/spec.go:133-160,314-318`
+  (`rook-config-override` at `/etc/ceph/ceph.conf`);
+  `pkg/operator/k8sutil/pod.go` (`ClusterDaemonEnvVars`),
+  `pkg/operator/ceph/controller/spec.go` (`ApplyNetworkEnv`).
 - Mon store: `dc7829268:pkg/operator/ceph/object/config.go:236-265`
   (`rgw_run_sync_thread` `"true"` unless `DisableMultisiteSyncTraffic`,
   `rgw_log_nonexistent_bucket`, `rgw_log_object_name_utc`,
-  `rgw_enable_usage_log`, `rgw_zone`, `rgw_zonegroup`);
+  `rgw_enable_usage_log`, `rgw_zone`, `rgw_zonegroup`), `:272-276`
+  (`rgw_s3_auth_use_keystone`), `:278-288` (swift), `:290-319`
+  (`rgwConfig`, `rgwConfigFromSecret`), `:324-360` (keystone);
   `pkg/operator/ceph/config/monstore.go:286-345` (`assimilate-conf`);
-  same at `v1.20.7:...config.go:256-265,300`.
-- Probes: `dc7829268:pkg/operator/ceph/object/spec.go:634-642` (no
+  `pkg/operator/ceph/cluster/cluster.go:824-840` (`ms_*_mode` secure with
+  encryption); same six keys at `v1.20.7:...config.go:256-265,300`.
+- Probes: `dc7829268:pkg/operator/ceph/object/spec.go:640-642` (no
   liveness), `:644-680`, `:714-752`, `:683-712`, `:754-775`;
   `pkg/operator/ceph/object/rgw-probe.sh:17,25,43-67`. Health checker
-  removed in `a7c0c7ee9`; ready at `controller.go:523-527`.
+  removed in `a7c0c7ee9`; ready at `controller.go:527`.
+- Exporter: `dc7829268:pkg/operator/ceph/nodedaemon/exporter.go:46,202`;
+  `pkg/operator/ceph/controller/spec.go:246-256,314-320` (the RGW pod's
+  `/run/ceph` mount).
 - Admin ops user: `pkg/operator/ceph/object/admin.go:114,117,484-535`,
   `user.go:113-175`. No per-daemon image: `pkg/apis/ceph.rook.io/v1/types.go:1911-1981,2091-2217`;
   every RGW container uses `c.clusterSpec.CephVersion.Image`
@@ -1016,19 +1247,35 @@ Rook (`~/github/rook`):
 - Suite: `dc7829268:tests/integration/ceph_object_test.go:44-144`
   (entry points `:124-143`, TLS `:87-101`);
   `tests/integration/object/util/sharedstore/sharedstore.go:96-107`
-  (zoned and classic), `:175-205` (placements `default` with storage
-  class `FOO`, and `bar`), `:259-296` (Service), `:370-374,386-392`;
-  `tests/integration/object/util/client/{s3.go:33-34,73,85, admin.go:35-63,
-  tls.go:38-45,52-85}`; `tests/scripts/generate-tls-config.sh:45,54`;
-  `pkg/operator/ceph/object/objectstore.go:955-973` (`<pool>:<store>`
-  namespaces), `:75,1130-1135` (`dashboard-admin`);
-  `tests/framework/installer/ceph_installer.go:46-51,96-116`,
-  `ceph_manifests.go:170-171`; go-ceph `rgw/admin/radosgw.go:94-95`
-  (`UNSIGNED-PAYLOAD`, module cache v0.41.0). CI invocation
-  `.github/workflows/ceph-suite-integration-test.yml:133-137`. Chart
-  keys `deploy/charts/rook-ceph-cluster/values.yaml:110-116`.
+  (zoned and classic), `:175-204` (placement `bar`; `FOO` on `default`
+  already at `v1.20.7:...sharedstore.go:123-125`), `:259-296` (Service),
+  `:370-374,386-392`;
+  `tests/integration/object/util/client/{s3.go:33-36,73,85, admin.go:35-63,
+  tls.go:38-45,52-85}` (`radosgw-admin` in the toolbox `s3.go:33-36`;
+  `GET /admin/info` `admin.go:57-60`);
+  `tests/scripts/generate-tls-config.sh:45,54`;
+  `pkg/operator/ceph/object/objectstore.go:77-99` (namespace suffix
+  table), `:948-975` (applied), `:75,1130-1220` and `rgw.go:77-101`
+  (`dashboard-admin`); the operator's admin calls
+  `pkg/operator/ceph/object/admin.go:171-205`,
+  `pkg/operator/ceph/object/user/controller.go:437-504`,
+  `pkg/operator/ceph/object/bucket/provisioner.go:921-938`;
+  `tests/framework/installer/ceph_installer.go:44-53` (image table),
+  `:96-116`, `:214` (toolbox routing), `ceph_manifests.go:159-161` (no
+  pull policy), `:170-171`, `:190-193`; go-ceph
+  `rgw/admin/radosgw.go:94-95` (`UNSIGNED-PAYLOAD`, module cache
+  v0.41.0). CI invocation
+  `.github/workflows/ceph-suite-integration-test.yml:133-137`; kind
+  `.github/workflows/integration-test-setup-cluster-resources/action.yaml:29-38`,
+  `tests/config/kind-config.yaml`; image import
+  `tests/scripts/github-action-helper.sh:348-363`
+  (`load_image_into_cluster`). Chart keys
+  `deploy/charts/rook-ceph-cluster/values.yaml:110-116`; the chart
+  operator's scope `v1.20.7:deploy/charts/rook-ceph/values.yaml:45`
+  (`currentNamespaceOnly: false`).
 
-rados-rs (`scratchpad/rados-rs`, `origin/main` = a511eca):
+rados-rs (`scratchpad/rados-rs`, `origin/main` = 0b5d1a2; the draft read
+a511eca, and a511eca..0b5d1a2 is three test-only commits):
 
 - Workspace: `Cargo.toml` (members, version 0.1.4, rust-version 1.88,
   edition 2024, MIT); `rados/Cargo.toml` (snap, zstd, lz4, flate2;
@@ -1050,17 +1297,32 @@ rados-rs (`scratchpad/rados-rs`, `origin/main` = a511eca):
   `:262`); `rados/src/osdclient/types.rs:173-178,203-217,589-590,616,935,
   1146-1168,1389-1410,1530-1562,1583`; `rados/src/osdclient/messages.rs:117-139`
   (flags from opcode); `rados/src/osdclient/client.rs:2054-2062` (mtime
-  only when WRITE-flagged); `rados-cls/src/otp.rs:18-20`.
-- Throttle and retry: `rados/src/osdclient/throttle.rs:12-14,70-107,163-184`;
-  `rados/src/osdclient/client.rs:191,233-239,470-505,1891-1892,1911-1968`
-  (`:1961-1965` "allocates a fresh tid"), `:2166-2179`;
+  only when WRITE-flagged); `rados-cls/src/otp.rs:18-20`. Gap 2:
+  `rados/src/osdclient/operation.rs:419-422` (`flags`),
+  `rados/src/osdclient/client.rs:1857-1858,2027`; `rados-cls/src/call.rs:36-66`
+  and `rados/src/osdclient/ioctx.rs:1081-1083` (class calls set no flag).
+  Gap 4: `client.rs:1846` (`execute_built_op_with_id`, public),
+  `types.rs:203-217` (`ObjectId` with namespace and key). Gap 6: builder
+  steps through `OSDOp::` constructors only, `types.rs:935,1146-1222`;
+  `Stat` only, `types.rs:826-832`; `calc_op_budget` `types.rs:1359-1379`.
+- Throttle and retry: `rados/src/osdclient/throttle.rs:12-14,70-107,163-184`
+  (`acquire_many` with no clamp to the budget `:70-93`);
+  `rados/src/osdclient/client.rs:191,233-239,470-505,1891-1892,1911-1968`,
+  `:2166-2179` (resend paths; the fix is
+  [jhoblitt/rados-rs#28](https://github.com/jhoblitt/rados-rs/pull/28));
   `rados/src/osdclient/session.rs:863-868,1198-1215`;
   `rados/src/osdclient/tracker.rs:22-27`.
+- Messenger and mgr: mode lists `rados/src/msgr2/mod.rs:327,358`, no
+  `ms_client_mode` plumbing into `ClientBuilder`; client address
+  `rados/src/msgr2/protocol.rs:1007`. No mgr client: the only hits are
+  the `mgrmap` subscription name, `rados/src/monclient/subscription.rs:21`,
+  `rados/src/monclient/client.rs:178,1742`.
 - Watch: `rados/src/osdclient/watch.rs:26-42,53,361-430,472-487,505-553,
   596-600`; `rados/src/osdclient/ioctx.rs:766,772,791`;
   `rados/src/osdclient/client.rs:33-37,579-595,649-681,999-1036,1147-1151,
   1270-1278`.
-- Encoding: `rados/src/denc/codec.rs:53,315,373,408,416,458-547,641-851`;
+- Encoding: `rados/src/denc/codec.rs:53,315,373,408,416,458-547,641-851`
+  (one maximum for both checks `:493-508`, tail skipped `:543-544`);
   `rados-denc-macros/src/lib.rs:38,76-85,139-145,225,280,401-405,406,467,565`;
   `rados/src/denc/macros.rs:28-41,66-74`; `rados/src/denc/types.rs:42-70`
   (`UTime`); no legacy compat-length framing under `rados/src/denc` (grep);
@@ -1077,31 +1339,52 @@ rados-rs (`scratchpad/rados-rs`, `origin/main` = a511eca):
 - Errors: `rados/src/osdclient/error.rs:31-69`.
 - Cephx: `rados/src/auth/aes256krb5.rs:1-3`; `rados/src/auth/types.rs:54-65`;
   `rados/tests/cephx_aes256k.rs:153-207`.
-- CI and publish: `.github/workflows/ci.yml:29,55-68,87,89-136`;
+- CI and publish: `.github/workflows/ci.yml:29` (fmt), `:55-68` (clippy
+  per feature, no `--all-features`), `:87` (test, no `--locked`),
+  `:89-136` (`corpus-test`, the apt ceph-dencoder comparison); no
+  `cargo deny` anywhere and no `[workspace.lints]`, the unwrap and expect
+  rule is prose in `.claude/CLAUDE.md:75,85`;
   `.github/workflows/test-with-ceph.yml:21-22,57-62,76-129`;
   `docker/docker-compose.ceph.yml:3` (v19.2.2);
   `.github/workflows/publish.yml:76-84` (`rados-denc-macros`, `rados`
-  only). rooket instructions: `rados/tests/common/mod.rs:12-59,84-99`.
+  only; `rados-cls/Cargo.toml` has no `publish = false`). rooket
+  instructions: `rados/tests/common/mod.rs:12-59,84-99`.
 - Duplicate map keys: rados-rs `design/rgw-mvp`
   `docs/superpowers/plans/2026-09-25-rgw-mvp-16-release-shapes.md:864-883`;
   `docs/superpowers/ceph-upstream-bugs.md:593-597`. The Rook paragraph:
   `docs/superpowers/specs/2026-09-24-rados-rs-rgw-mvp-design.md:92-104`
-  (commit 15389c2).
+  (commit 15389c2). Registry entries this spec answers, on
+  `design/rgw-mvp` at b056c4f: CEPH-BUG-017 (`ceph-upstream-bugs.md:591`,
+  UPDATE_OBJ handling) and CEPH-BUG-019 (`:767`, shard counts).
 
-rgw-go (`~/github/rgw-go` at ca998e2, clean tree):
+rgw-go (`~/github/rgw-go` at b0929ee; the draft read ca998e2, and the
+one merge between touches only `docs/exclusions.md`):
 
-- Packages present: `internal/{denc,meta,acl,radosclient,radosclient/goceph,cls/*}`,
-  `test/gate`; absent: `internal/{driver,op,s3,auth}`.
+- Packages present: `cmd/rgw-go`, `internal/{denc,meta,acl,radosclient,radosclient/goceph,cls/*,cli,version,testutil}`,
+  `test/gate`, `hack/{rooket,goldens}`; absent: `internal/{driver,op,s3,auth,policy,admin,iam,cephconf,frontend,metrics,asok,opslog}`.
+- Spec `docs/superpowers/specs/2026-09-25-rgw-go-design.md`: `:68-71`
+  (only librados bindings go to the go-ceph fork), `:140-147` (`cephconf`
+  parses the early arguments and `CEPH_ARGS`), `:326-328` (admin-socket
+  counters in phase 3), `:417-423` (the derived image). The exclusions
+  corrections: `docs/exclusions.md:100-103,133-136`, commit 4312a7a. The
+  watch error channel forwarded from go-ceph's `Watcher.Errors()`:
+  `d8efe8a`. The gate's finding: `docs/ceph-upstream-bugs.md:222`.
 - rooket harness: `hack/rooket/up.sh:22-23,57`; `hack/rooket/lib.sh:8,23,46-54`;
   `hack/rooket/{squid,tentacle}/values/rook-ceph-cluster.yaml:5` (v19.2.6,
   v20.2.4; `dashboard.enabled: false`); `hack/rooket/{squid,tentacle}/config.yaml:4`;
   `hack/rooket/README.md:57-59,96-103`; podman path retired in `fa9ac12`;
-  rooket pinned at 9e9ab38e, `.github/workflows/integration.yml:21,32-33,127`.
+  rooket pinned at 9e9ab38e, `.github/workflows/integration.yml:21,32-33,127`;
+  the service-map lookups `hack/rooket/lib.sh:64-79`,
+  `hack/rooket/populate.sh:23-28`, `hack/rooket/up.sh:42-47`.
 - Gate: `test/gate/phase0_test.go:93-103,116-139,167-197,199-219,399,
-  1319-1470`; `hack/rooket/populate.sh:23-34,43-53,124-135,190-211`.
-- Goldens: `hack/goldens/gen.sh:5-8,14-15,39-44`;
+  1319-1470`; connect from `ceph.conf` `:414`; layout reads and pool
+  listings `:286-295,1191`; counts against the manifest
+  `:982-983,1185-1186,1444`; `hack/rooket/populate.sh:23-34,43-53,124-135,190-211`.
+  Phase 0 plan task index `docs/superpowers/plans/2026-09-26-phase-0-foundations.md:66-87`.
+- Goldens: `hack/goldens/gen.sh:5-8,14-15,29,37,39-44`;
   `internal/denc/goldentest/goldentest.go:32-59,62-71,89-94`;
-  `hack/goldens/types.txt:1-98`; 3376 triples (count of `.bin`).
+  `hack/goldens/types.txt:1-98`; 3376 triples (count of `.bin`), 54 MB
+  across seven packages.
 - go-ceph pin `go.mod:41`; no Dockerfile; `.goreleaser.yaml:8-12`;
   thread counts `docs/cgo-limitations.md:23-25,33-34,39-41`; registry
   `docs/ceph-upstream-bugs.md` (18 entries; verdicts at `:38,56,73,91,111,
@@ -1110,7 +1393,9 @@ rgw-go (`~/github/rgw-go` at ca998e2, clean tree):
 
 rgw-rs spike (`~/github/rgw-rs` at 8621b5a, clean tree):
 
-- `Cargo.toml:2-9`; `Cargo.lock` (hyper 1.11.1, axum 0.8.9, tokio 1.53.1,
+- `Cargo.toml:2-9` (`:9` LGPL-2.1-or-later); `FINDINGS.md` at the
+  repository root; README `:6,11` ("research spike", "throwaway");
+  `Cargo.lock` (hyper 1.11.1, axum 0.8.9, tokio 1.53.1,
   rustls 0.23.45, tokio-rustls 0.26.5, quick-xml 0.42.0, aws-sdk-s3
   1.149.0); `.cargo/config.toml:4-5`; workflows ci, codeql, commitlint,
   dependency-review, scorecard, workflow-lint; 119 tests.
@@ -1130,9 +1415,60 @@ rooket (`scratchpad/rooket-src`, README "Using rooket as a test harness"):
 the `up`, `ceph-config` and `wait` commands, the `host-network` rule,
 `cephImage.tag` and `allowUnsupported`, the users the cluster adds; no
 `cephImage` special-casing in its Go sources (grep), so `cephImage.repository`
-in a values file reaches the chart unchanged.
+in a values file reaches the chart unchanged. A bare kind cluster:
+`rooket cluster create`, or `rooket up --skip-build --skip-deploy`
+(`cmd/up.go:54`, README `:425`); `rooket wait` `cmd/wait.go:42-55`;
+toolbox access `rooket k -n rook-ceph exec deploy/rook-ceph-tools --`
+(README `:83,180-183`), with no `rooket exec`.
 
-Unverified in this draft: whether an operation larger than rados-rs's
-byte budget is ever admitted (an inference from tokio semaphore
-semantics, not a test); whether the fork holds a crates.io token; the
+Unverified in this draft: whether the fork holds a crates.io token; the
 exact behaviour of Rook's S3 test client's checksum middleware.
+
+## Review edits applied (2026-09-27)
+
+The adversarial review of draft 2bc2099, with the owner's rulings, one
+line per finding:
+
+1. The golden generator moves ahead of its users, to package 3; section
+   12 names how goldens are made and rgw-go's layout; the phase 0 gate
+   admits the toolbox dencoder's re-encoding.
+2. The privilege drop order is corrected: connect, bind, then drop.
+3. The legacy framing is required by the rule only; package 2 is the
+   open-version decode, which Squid's own manifests need, and the mode is
+   `rgw-meta`'s alone.
+4. The driver foundation is split: connection and release detection stay
+   in phase 0 as the one deviation from decision 3; site and system
+   objects open phase 1; gap packages are scheduled to their first user.
+5. Gap 7, the mgr client, is added and placed in phase 1 before the Rook
+   suite; rgw-rs's harness does not read the service map.
+6. Section 5 is rewritten: Rook's full argv, environment, `ceph.conf` and
+   mon-store writes, the minimum under Rook, and radosgw's own default
+   overrides; the exclusions corrections are recorded as landed.
+7. Throttle parity is 24576 operations; the byte throttle's refusal of an
+   oversized operation is a rados-rs defect in gap 6.
+8. Layer-map corrections: reshard log names, the head locator, Rook's
+   namespace suffixes, decoder maxima, the return-vector reply cap, the
+   tier nit, the appendix cites and the corpus pin.
+9. The Rook suite runs on a bare kind cluster with the derived image
+   loaded under the table's name and `radosgw-admin` kept; `GET
+   /admin/info` and the operator's admin calls join phase 1; section 1's
+   placement sentence is corrected.
+10. The gates are attributed to rados-rs correctly, with the additions
+    named; the license is LGPL-2.1-or-later, with a `cargo deny` policy to
+    match.
+11. Section 15 records the owner's decisions, with the license as decision
+    8; the README line, the `FINDINGS.md` move, the messenger-mode package
+    (gap 8, in flight) and gap 3's in-flight fix are added; the derived
+    image moves to what is mirrored on purpose.
+12. Gaps 2 and 4 are made precise, and gap 6 gains the builder, `stat2`
+    and budget items.
+13. Text corrections in sections 7, 9, 12 and 16 and the appendix; the
+    rgw-go pin moves to b0929ee and the rados-rs pin to 0b5d1a2.
+14. The TLS combined PEM and the beast key list are pinned; admin-socket
+    counters are placed in phase 3; the anonymous `GET /` body is
+    required.
+
+Security: section 17 and gap 3 are stated as requirements, and no caps or
+check shapes are described. Owner-agreed additions: UPDATE_OBJ handling by
+invalidation (sections 7, 16 and 17) and the refusal of shard counts
+below 1 (sections 5 and 16).
